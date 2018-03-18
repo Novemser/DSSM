@@ -61,6 +61,6 @@ tikv-client/bazel-*
 # ignore docker-TiDB cluster data
 data
 src/main/resources/MNIST
-src/main/resources/mushroom
+
 # ignore test properties
 core/src/test/resources/tidb_config.properties

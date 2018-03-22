@@ -10,11 +10,14 @@ import org.apache.spark.mllib.tree.configuration.{Algo => OldAlgo, Strategy => O
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.Dataset
 
-class DTC(val uid: String) extends ProbabilisticClassifier[Vector, DTC, DecisionTreeClassificationModel]
+import scala.collection.mutable
+
+class CustomDecisionTreeClassifier(val uid: String)
+  extends ProbabilisticClassifier[Vector, CustomDecisionTreeClassifier, DecisionTreeClassificationModel]
   with DecisionTreeClassifierParams with DefaultParamsWritable {
   def this() = this(Identifiable.randomUID("decTree"))
 
-  override def copy(extra: ParamMap): DTC = {
+  override def copy(extra: ParamMap): CustomDecisionTreeClassifier = {
     this
   }
 

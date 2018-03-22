@@ -1,13 +1,14 @@
 package com.novemser
 
 import org.apache.spark.SparkConf
-import org.apache.spark.ml.classification.{DTC, DecisionTreeClassificationModel, LogisticRegression, RandomForestClassifier}
+import org.apache.spark.ml.classification.{CustomDecisionTreeClassifier, DecisionTreeClassificationModel, LogisticRegression, RandomForestClassifier}
 import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
 import org.apache.spark.ml.feature._
 import org.apache.spark.ml.linalg.{Vector, Vectors}
 import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.tuning.{CrossValidator, ParamGridBuilder}
 import org.apache.spark.ml.{Pipeline, PipelineModel}
+import org.apache.spark.mllib.tree.RandomForest
 import org.apache.spark.sql.{Row, SparkSession}
 
 import scala.collection.mutable
@@ -153,7 +154,7 @@ object LearnMLlib {
     //      .setNumFeatures(1000)
     //      .setInputCol(tokenizer.getOutputCol)
     //      .setOutputCol("features")
-    val dt = new DTC()
+    val dt = new CustomDecisionTreeClassifier()
       .setLabelCol("indexedLabel")
       .setFeaturesCol("indexedFeatures")
     // Convert indexed labels back to original labels.
@@ -197,15 +198,15 @@ object LearnMLlib {
 
   }
 
-  def testLoadToDT(): Unit = {
+  def testLoadToDT(path: String): Unit = {
     val data = spark
       .read
       .option("header", "true")
-      .csv("/home/novemser/Documents/Code/DSSM/src/main/resources/mushroom/mushroom.csv")
+      .csv(path)
 
-    //    val Array(trainData, testData) = data.randomSplit(Array(0.7, 0.3))
-    val trainData = data.filter("`stalk-shape` = 'e'")
-    val testData = data.filter("`stalk-shape` = 't'")
+    val Array(trainData, testData) = data.randomSplit(Array(0.8, 0.2))
+    //    val trainData = data.filter("`stalk-shape` = 'e'")
+    //    val testData = data.filter("`stalk-shape` = 't'")
     trainData.cache()
     testData.cache()
     println(
@@ -275,22 +276,24 @@ object LearnMLlib {
       .setNumFolds(20)
       .setParallelism(4)
     // Run cross-validation, and choose the best set of parameters.
-    val cvModel = cv.fit(trainData)
-    val transformed = cvModel.transform(testData)
+    //    val cvModel = cv.fit(trainData)
+    //    val transformed = cvModel.transform(testData)
     //      .select("predictedLabel", "label", "features")
     //      .show(10, truncate = false)
-    val acc2 = evaluator.evaluate(transformed)
-    println(s"Acc2: $acc2")
+    //    val acc2 = evaluator.evaluate(transformed)
+    //    println(s"Acc2: $acc2")
     //    data.show(10, truncate = false)
   }
 
-  def testMyTree(): Unit = {
+  def testMyTree(path: String): Unit = {
     val data = spark
       .read
       .option("header", "true")
-      .csv("/home/novemser/Documents/Code/DSSM/src/main/resources/mushroom/mushroom.csv")
+      .csv(path)
 
-    val Array(trainData, testData) = data.randomSplit(Array(0.7, 0.3))
+    val Array(trainData, testData) = data.randomSplit(Array(1.0, 0.0))
+    //    val trainData = data.filter("`stalk-shape` = 'e'")
+    //    val testData = data.filter("`stalk-shape` = 't'")
     trainData.cache()
     testData.cache()
     println(
@@ -301,14 +304,13 @@ object LearnMLlib {
     data.schema.map(_.name).filter(_ != "id").filter(_ != "class").foreach((name: String) => {
       val stringIndexer = new StringIndexer()
         .setInputCol(name)
-        .setHandleInvalid("keep")
+        .setHandleInvalid("skip")
         .setOutputCol(s"indexed_$name")
         .fit(trainData)
       indexers += stringIndexer
     })
 
     val labelIndexer = new StringIndexer()
-      .setHandleInvalid("keep")
       .setInputCol("class")
       .setOutputCol("label")
       .fit(trainData)
@@ -317,12 +319,10 @@ object LearnMLlib {
       .setInputCols(indexers.map(_.getOutputCol).toArray)
       .setOutputCol("features")
 
-    val rf = new DTC()
-      //      .setNumTrees(50)
+    val rf = new CustomDecisionTreeClassifier()
       .setFeaturesCol(assembler.getOutputCol)
       .setLabelCol(labelIndexer.getOutputCol)
-    //      .setMaxBins(100)
-    //      .setMaxDepth(9)
+
     // Convert indexed labels back to original labels.
     val labelConverter = new IndexToString()
       .setInputCol("prediction")
@@ -336,12 +336,26 @@ object LearnMLlib {
     val model = pipeline.fit(trainData)
     var e = System.currentTimeMillis()
     println(s"Train time ${e - s}")
+    // Make predictions.
+    s = System.currentTimeMillis()
+    val predictions = model.transform(testData)
+    e = System.currentTimeMillis()
+    println(s"Predict time ${e - s}")
+    // Select example rows to display.
+    predictions.select("predictedLabel", "label", "features").show(5, truncate = false)
+    val evaluator = new MulticlassClassificationEvaluator()
+      .setLabelCol(labelIndexer.getOutputCol)
+      .setPredictionCol(labelConverter.getInputCol)
+      .setMetricName("accuracy")
+    val accuracy = evaluator.evaluate(predictions)
+    println(s"Accuracy: $accuracy")
   }
 
   def main(args: Array[String]): Unit = {
     //    pipeline()
     //    testDT()
-    //    testLoadToDT()
-    testMyTree()
+    //    testLoadToDT("/home/novemser/Documents/Code/DSSM/src/main/resources/mushroom/mushroom.csv")
+    //    testMyTree("/home/novemser/Documents/Code/DSSM/src/main/resources/mushroom/mushroom.csv")
+    testMyTree("/home/novemser/Documents/Code/DSSM/src/main/resources/simple/load.csv")
   }
 }

@@ -4,7 +4,7 @@ import org.apache.spark.ml.feature.LabeledPoint
 import org.apache.spark.ml.linalg.Vector
 import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.tree.DecisionTreeClassifierParams
-import org.apache.spark.ml.tree.impl.RandomForest
+import org.apache.spark.ml.tree.impl.{RandomForest, RichDecisionTreeClassificationModel, TransferRandomForest}
 import org.apache.spark.ml.util.{DefaultParamsWritable, Identifiable, Instrumentation, MetadataUtils}
 import org.apache.spark.mllib.tree.configuration.{Algo => OldAlgo, Strategy => OldStrategy}
 import org.apache.spark.rdd.RDD
@@ -40,13 +40,20 @@ class CustomDecisionTreeClassifier(val uid: String)
     val instr = Instrumentation.create(this, oldDataset)
     instr.logParams(params: _*)
 
-    val trees = RandomForest.run(oldDataset, strategy, numTrees = 1, featureSubsetStrategy = "all",
+//    val Array(src, tgt) = oldDataset.randomSplit(Array(0.5, 0.5))
+    val src = oldDataset
+    val tgt = oldDataset
+
+    val trees = TransferRandomForest.run(src, strategy, numTrees = 1, featureSubsetStrategy = "all",
       seed = $(seed), instr = Some(instr), parentUID = Some(uid))
 
     println(categoricalFeatures)
     println(numClasses)
     val m = trees.head.asInstanceOf[DecisionTreeClassificationModel]
     instr.logSuccess(m)
+    println("Transfer----------------------------------------------")
+    TransferRandomForest.transfer(m.asInstanceOf[RichDecisionTreeClassificationModel], tgt, strategy, numTrees = 1,
+      featureSubsetStrategy = "all", seed = $(seed), instr = Some(instr), parentUID = Some(uid))
     m
   }
 

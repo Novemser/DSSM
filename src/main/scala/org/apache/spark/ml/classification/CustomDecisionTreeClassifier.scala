@@ -10,8 +10,6 @@ import org.apache.spark.mllib.tree.configuration.{Algo => OldAlgo, Strategy => O
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.Dataset
 
-import scala.collection.mutable
-
 class CustomDecisionTreeClassifier(val uid: String)
   extends ProbabilisticClassifier[Vector, CustomDecisionTreeClassifier, DecisionTreeClassificationModel]
   with DecisionTreeClassifierParams with DefaultParamsWritable {
@@ -47,8 +45,8 @@ class CustomDecisionTreeClassifier(val uid: String)
     val trees = TransferRandomForest.run(src, strategy, numTrees = 1, featureSubsetStrategy = "all",
       seed = $(seed), instr = Some(instr), parentUID = Some(uid))
 
-    println(categoricalFeatures)
-    println(numClasses)
+//    println(categoricalFeatures)
+//    println(numClasses)
     val m = trees.head.asInstanceOf[DecisionTreeClassificationModel]
     instr.logSuccess(m)
     println("Transfer----------------------------------------------")

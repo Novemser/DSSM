@@ -38,4 +38,24 @@ object Utils {
     }
     ClassificationError(correctPredictionCount, falseCount + trueCount)
   }
+
+  def leafError(node: TransferLearningNode): Double = {
+    node.error.errorRate()
+  }
+
+  def subTreeError(node: TransferLearningNode): Double = {
+    val (errorCount, totalCount) = subTreeStats(node)
+    errorCount / totalCount
+  }
+
+  private def subTreeStats(node: TransferLearningNode): (Double, Double) = {
+    if (node.leftChild.isEmpty) {
+      require(node.rightChild.isEmpty)
+      (node.error.errorSampleCount(), node.error.totalSampleCount())
+    } else {
+      val left = subTreeStats(node.leftChild.asInstanceOf[TransferLearningNode])
+      val right = subTreeStats(node.leftChild.asInstanceOf[TransferLearningNode])
+      (left._1 + right._1, left._2 + right._2)
+    }
+  }
 }

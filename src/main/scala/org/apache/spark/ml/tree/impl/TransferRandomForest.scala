@@ -6,7 +6,7 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.ml.feature.LabeledPoint
 import org.apache.spark.ml.tree._
 import org.apache.spark.ml.tree.impl.RandomForest._
-import org.apache.spark.ml.tree.model.{ClassificationError, ErrorStats}
+import org.apache.spark.ml.tree.model.ErrorStats
 import org.apache.spark.ml.util.Instrumentation
 import org.apache.spark.mllib.tree.configuration.{Algo => OldAlgo, Strategy => OldStrategy}
 import org.apache.spark.mllib.tree.impurity.ImpurityCalculator
@@ -115,7 +115,7 @@ object TransferRandomForest extends Logging {
     rng.setSeed(seed)
 
     // Allocate and queue root nodes.
-    val topNodes = Array.fill[LearningNode](numTrees)(TransferLearningNode.emptyNode(nodeIndex = 1))
+    val topNodes = Array.fill[TransferLearningNode](numTrees)(TransferLearningNode.emptyNode(nodeIndex = 1))
     Range(0, numTrees).foreach(treeIndex => nodeStack.push((treeIndex, topNodes(treeIndex))))
 
     timer.stop("init")
@@ -261,7 +261,8 @@ object TransferRandomForest extends Logging {
     // Add top node to stack
     val topNodes = Array(trainedModel.rootLearningNode)
     // push the leaf node into stack
-    topNodes.flatMap(extractLeafNodes).foreach(node => nodeStack.push((0, node)))
+    val leafToExpand = topNodes.flatMap(extractLeafNodes)
+    leafToExpand.foreach(node => nodeStack.push((0, node)))
     timer.stop("init")
 
     while (nodeStack.nonEmpty) {
@@ -290,25 +291,34 @@ object TransferRandomForest extends Logging {
 
     timer.stop("total")
 
-    logInfo("Internal timing for DecisionTree:")
+    logInfo("Internal timing for SER expansion:")
     logInfo(s"$timer")
     println("After trainedModel" + trainedModel.rootLearningNode.toNode.subtreeToString(4))
-
+    // Pruning
+    leafToExpand.foreach( expandedLeaf => {
+      // If the leaf error of current node is smaller than the expanded sub-tree,
+      // that means that if we do not expand current node, will get better result
+      // in the target dataset.
+      if (Utils.leafError(expandedLeaf) < Utils.subTreeError(expandedLeaf)) {
+        // Pruning this node
+        logWarning(s"Pruning node [${expandedLeaf.id}]")
+        expandedLeaf.leftChild = None
+        expandedLeaf.rightChild = None
+        expandedLeaf.isLeaf = true
+      }
+    })
     trainedModel
   }
 
-  private def extractLeafNodes(node: LearningNode): Array[LearningNode] = {
+  private def extractLeafNodes(node: TransferLearningNode): Array[TransferLearningNode] = {
     if (node.leftChild.isEmpty && node.rightChild.isEmpty) {
       // Reset node statistic info to null for the following calculation
       node.stats = null
-      node match {
-        case n : TransferLearningNode =>
-          println(s"Capture node [${n.id}], error {${n.error}")
-        case _ =>
-      }
+      println(s"Capture node [${node.id}], error {${node.error}")
       return Array(node)
     }
-    extractLeafNodes(node.leftChild.get) ++ extractLeafNodes(node.rightChild.get)
+    extractLeafNodes(node.leftChild.get.asInstanceOf[TransferLearningNode]) ++
+      extractLeafNodes(node.rightChild.get.asInstanceOf[TransferLearningNode])
   }
 
   private[tree] def findBestSplits(input: RDD[BaggedPoint[TreePoint]],
@@ -905,7 +915,7 @@ object TransferRandomForest extends Logging {
                             instanceWeight: Double,
                             featuresForNode: Option[Array[Int]]): Unit = {
     val numFeaturesPerNode = if (featuresForNode.nonEmpty) {
-      // Use subsampled features
+      // Use sub-sampled features
       featuresForNode.get.length
     } else {
       // Use all features

@@ -1,13 +1,12 @@
 package org.apache.spark.ml.tree.impl
 
+import org.apache.spark.ml.Pipeline
+import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
 import org.apache.spark.ml.tree._
 import org.apache.spark.ml.tree.model.ClassificationError
+import org.apache.spark.sql.{Dataset, Row}
 
 object Utils {
-  def printTree(rootNode: Node): Unit = {
-    println(rootNode.subtreeToString())
-  }
-
   def predictImpl(rootNode: LearningNode, binnedFeatures: Array[Int], splits: Array[Array[Split]]): LearningNode = {
     if (rootNode.isLeaf || rootNode.split.isEmpty) {
       rootNode
@@ -28,15 +27,8 @@ object Utils {
   }
 
   def calcClassificationError(stats: Array[Double], predict: Double): ClassificationError = {
-    require(stats.length == 2, "Stats length must be 2[false predict count, true predict count]")
-    val falseCount = stats(0)
-    val trueCount = stats(1)
-    val correctPredictionCount = if (predict < 1) {
-      falseCount
-    } else {
-      trueCount
-    }
-    ClassificationError(correctPredictionCount, falseCount + trueCount)
+    val predictCount = stats(predict.toInt)
+    ClassificationError(predictCount, stats.sum)
   }
 
   def leafError(node: TransferLearningNode): Double = {
@@ -53,9 +45,29 @@ object Utils {
       require(node.rightChild.isEmpty)
       (node.error.errorSampleCount(), node.error.totalSampleCount())
     } else {
-      val left = subTreeStats(node.leftChild.asInstanceOf[TransferLearningNode])
-      val right = subTreeStats(node.leftChild.asInstanceOf[TransferLearningNode])
+      val left = subTreeStats(node.leftChild.get.asInstanceOf[TransferLearningNode])
+      val right = subTreeStats(node.leftChild.get.asInstanceOf[TransferLearningNode])
       (left._1 + right._1, left._2 + right._2)
     }
+  }
+
+  def trainAndTest(pipeline: Pipeline, trainData: Dataset[Row], testData: Dataset[Row]): Unit = {
+    var s = System.currentTimeMillis()
+    val model = pipeline.fit(trainData)
+    var e = System.currentTimeMillis()
+    println(s"Train time ${e - s}")
+    // Make predictions.
+    s = System.currentTimeMillis()
+    val predictions = model.transform(testData)
+    e = System.currentTimeMillis()
+    println(s"Predict time ${e - s}")
+    // Select example rows to display.
+    predictions.select("predictedLabel", "label", "features").show(5, truncate = false)
+    val evaluator = new MulticlassClassificationEvaluator()
+      .setLabelCol("label")
+      .setPredictionCol("prediction")
+      .setMetricName("accuracy")
+    val accuracy = evaluator.evaluate(predictions)
+    println(s"Accuracy: $accuracy")
   }
 }

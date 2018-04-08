@@ -1,11 +1,14 @@
 package com.novemser
 
+import java.util.concurrent.ThreadLocalRandom
+
 import org.apache.spark.SparkConf
-import org.apache.spark.ml.classification.{CustomDecisionTreeClassifier, DecisionTreeClassificationModel, LogisticRegression, RandomForestClassifier}
+import org.apache.spark.ml.classification._
 import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
 import org.apache.spark.ml.feature._
 import org.apache.spark.ml.linalg.{Vector, Vectors}
 import org.apache.spark.ml.param.ParamMap
+import org.apache.spark.ml.tree.impl.Utils
 import org.apache.spark.ml.tuning.{CrossValidator, ParamGridBuilder}
 import org.apache.spark.ml.{Pipeline, PipelineModel}
 import org.apache.spark.mllib.tree.RandomForest
@@ -198,16 +201,75 @@ object LearnMLlib {
 
   }
 
+  def testLetter(): Unit = {
+    val data = spark
+      .read
+      .option("header", "true")
+      .option("inferSchema", true)
+      .csv("src/main/resources/letter/letter-recognition.csv")
+
+    var Array(trainData, testData) = data.randomSplit(Array(1.0, 0.0))
+    val x2barmean = trainData.groupBy("class").agg("x2bar" -> "mean").collect().sortBy(_.getString(0))
+
+    testData = trainData.filter(row => {
+      val x2bar = row.getInt(7)
+      val mean = x2barmean.filter(keyMean => keyMean.getString(0).equalsIgnoreCase(row.getString(16))).head.getDouble(1)
+      x2bar <= mean
+    })
+
+    println(
+      s"trainData.count():${trainData.count()}\ntestData.count():${testData.count()}"
+    )
+
+    //    x2barmean.cache()
+    println(s"mean(${x2barmean.length}):${x2barmean.mkString(",")}")
+
+    val labelIndexer = new StringIndexer()
+      .setHandleInvalid("skip")
+      .setInputCol("class")
+      .setOutputCol("label")
+      .setStringOrderType("alphabetAsc")
+      .fit(trainData)
+
+    val assembler = new VectorAssembler()
+      .setInputCols(trainData.schema.map(_.name).filter(s => s != "class").toArray)
+      .setOutputCol("features")
+
+    val rf = new TransferRandomForestClassifier()
+    rf.setFeaturesCol { assembler.getOutputCol }
+      .setLabelCol { labelIndexer.getOutputCol }
+      .setNumTrees(50)
+
+    rf.splitFunction = point => {
+//      true
+      point.features.toArray(7) > x2barmean(point.label.toInt).getDouble(1)
+//      ThreadLocalRandom.current().nextBoolean()
+    }
+
+    // Convert indexed labels back to original labels.
+    val labelConverter = new IndexToString()
+      .setInputCol("prediction")
+      .setOutputCol("predictedLabel")
+      .setLabels(labelIndexer.labels)
+
+    val pipeline = new Pipeline()
+      .setStages(Array(labelIndexer, assembler, rf, labelConverter))
+
+    Utils.trainAndTest(pipeline, trainData, testData)
+  }
+
   def testLoadToDT(path: String): Unit = {
     val data = spark
       .read
       .option("header", "true")
       .csv(path)
 
-    val Array(trainData, testData) = data.randomSplit(Array(0.8, 0.2))
-    //    val trainData = data.filter("`stalk-shape` = 'e'")
-    //    val testData = data.filter("`stalk-shape` = 't'")
+    var Array(trainData, testData) = data.randomSplit(Array(1.0, 0.0))
+//    val trainData = data.filter("`stalk-shape` = 'e'") // 3516
+//    val testData = data.filter("`stalk-shape` = 't'") // 4608
     trainData.cache()
+    testData = data.filter("`stalk-shape` = 'e'")
+//    testData = trainData
     testData.cache()
     println(
       s"trainData.count():${trainData.count()}\ntestData.count():${testData.count()}"
@@ -233,12 +295,17 @@ object LearnMLlib {
       .setInputCols(indexers.map(_.getOutputCol).toArray)
       .setOutputCol("features")
 
-    val rf = new RandomForestClassifier()
+    val rf =
+      new CustomDecisionTreeClassifier()
+//      new RandomForestClassifier()
       .setNumTrees(50)
       .setFeaturesCol(assembler.getOutputCol)
       .setLabelCol(labelIndexer.getOutputCol)
-      .setMaxBins(100)
-      .setMaxDepth(9)
+//      .setMaxBins(100)
+//      .setMaxDepth(9)
+    rf.splitFunction = point => {
+      point.features.toArray(9) != 0
+    }
     // Convert indexed labels back to original labels.
     val labelConverter = new IndexToString()
       .setInputCol("prediction")
@@ -248,33 +315,34 @@ object LearnMLlib {
     val pipeline = new Pipeline()
       .setStages(indexers.toArray ++ Array(labelIndexer, assembler, rf, labelConverter))
     // Train model. This also runs the indexers.
-    var s = System.currentTimeMillis()
-    val model = pipeline.fit(trainData)
-    var e = System.currentTimeMillis()
-    println(s"Train time ${e - s}")
-    // Make predictions.
-    s = System.currentTimeMillis()
-    val predictions = model.transform(testData)
-    e = System.currentTimeMillis()
-    println(s"Predict time ${e - s}")
-    // Select example rows to display.
-    predictions.select("predictedLabel", "label", "features").show(5, truncate = false)
-    val evaluator = new MulticlassClassificationEvaluator()
-      .setLabelCol(labelIndexer.getOutputCol)
-      .setPredictionCol(labelConverter.getInputCol)
-      .setMetricName("accuracy")
-    val accuracy = evaluator.evaluate(predictions)
-    println(s"Accuracy: $accuracy")
+    Utils.trainAndTest(pipeline, trainData, testData)
+//    var s = System.currentTimeMillis()
+//    val model = pipeline.fit(trainData)
+//    var e = System.currentTimeMillis()
+//    println(s"Train time ${e - s}")
+//    // Make predictions.
+//    s = System.currentTimeMillis()
+//    val predictions = model.transform(testData)
+//    e = System.currentTimeMillis()
+//    println(s"Predict time ${e - s}")
+//    // Select example rows to display.
+//    predictions.select("predictedLabel", "label", "features").show(5, truncate = false)
+//    val evaluator = new MulticlassClassificationEvaluator()
+//      .setLabelCol(labelIndexer.getOutputCol)
+//      .setPredictionCol(labelConverter.getInputCol)
+//      .setMetricName("accuracy")
+//    val accuracy = evaluator.evaluate(predictions)
+//    println(s"Accuracy: $accuracy")
 
-    val paramGrid = new ParamGridBuilder()
-      .addGrid(rf.numTrees, Array(100, 40, 50))
-      .build()
-    val cv = new CrossValidator()
-      .setEstimator(pipeline)
-      .setEstimatorParamMaps(paramGrid)
-      .setEvaluator(evaluator)
-      .setNumFolds(20)
-      .setParallelism(4)
+//    val paramGrid = new ParamGridBuilder()
+//      .addGrid(rf.numTrees, Array(100, 40, 50))
+//      .build()
+//    val cv = new CrossValidator()
+//      .setEstimator(pipeline)
+//      .setEstimatorParamMaps(paramGrid)
+//      .setEvaluator(evaluator)
+//      .setNumFolds(20)
+//      .setParallelism(4)
     // Run cross-validation, and choose the best set of parameters.
     //    val cvModel = cv.fit(trainData)
     //    val transformed = cvModel.transform(testData)
@@ -352,10 +420,11 @@ object LearnMLlib {
   }
 
   def main(args: Array[String]): Unit = {
+    testLetter()
     //    pipeline()
     //    testDT()
-    //    testLoadToDT("/home/novemser/Documents/Code/DSSM/src/main/resources/mushroom/mushroom.csv")
+//    testLoadToDT("/home/novemser/Documents/Code/DSSM/src/main/resources/mushroom/mushroom.csv")
     //    testMyTree("/home/novemser/Documents/Code/DSSM/src/main/resources/mushroom/mushroom.csv")
-    testMyTree("/home/novemser/Documents/Code/DSSM/src/main/resources/simple/load.csv")
+    //    testMyTree("/home/novemser/Documents/Code/DSSM/src/main/resources/simple/load.csv")
   }
 }

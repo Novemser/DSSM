@@ -185,6 +185,148 @@ object TransferRandomForest extends Logging {
     }
   }
 
+  def transferModels(trainedModels: Array[RichDecisionTreeClassificationModel],
+               target: RDD[LabeledPoint],
+               strategy: OldStrategy,
+               numTrees: Int,
+               featureSubsetStrategy: String,
+               seed: Long,
+               instr: Option[Instrumentation[_]],
+               parentUID: Option[String] = None): Array[RichDecisionTreeClassificationModel] = {
+    val timer = new TimeTracker()
+
+    timer.start("total")
+
+    timer.start("init")
+    val retaggedInput = target.retag(classOf[LabeledPoint])
+    val metadata =
+      DecisionTreeMetadata.buildMetadata(retaggedInput, strategy, numTrees, featureSubsetStrategy)
+    instr match {
+      case Some(instrumentation) =>
+        instrumentation.logNumFeatures(metadata.numFeatures)
+        instrumentation.logNumClasses(metadata.numClasses)
+      case None =>
+        logInfo("numFeatures: " + metadata.numFeatures)
+        logInfo("numClasses: " + metadata.numClasses)
+    }
+
+    // Find the splits and the corresponding bins (interval between the splits) using a sample
+    // of the input data.
+    timer.start("findSplits")
+    val splits = findSplits(retaggedInput, metadata, seed)
+    timer.stop("findSplits")
+    logDebug("numBins: feature: number of bins")
+    logDebug(Range(0, metadata.numFeatures).map { featureIndex =>
+      s"\t$featureIndex\t${metadata.numBins(featureIndex)}"
+    }.mkString("\n"))
+
+    // Bin feature values (TreePoint representation).
+    // Cache input RDD for speedup during multiple passes.
+    val treeInput = TreePoint.convertToTreeRDD(retaggedInput, splits, metadata)
+
+    val withReplacement = numTrees > 1
+
+    val baggedInput = BaggedPoint
+      .convertToBaggedRDD(treeInput, strategy.subsamplingRate, numTrees, withReplacement, seed)
+      .persist(StorageLevel.MEMORY_AND_DISK)
+
+    // depth of the decision tree
+    val maxDepth = strategy.maxDepth
+    require(maxDepth <= 30,
+      s"DecisionTree currently only supports maxDepth <= 30, but was given maxDepth = $maxDepth.")
+    // Max memory usage for aggregates
+    // TODO: Calculate memory usage more precisely.
+    val maxMemoryUsage: Long = strategy.maxMemoryInMB * 1024L * 1024L
+    logDebug("max memory usage for aggregates = " + maxMemoryUsage + " bytes.")
+
+    val nodeIdCache = if (strategy.useNodeIdCache) {
+      Some(NodeIdCache.init(
+        data = baggedInput,
+        numTrees = numTrees,
+        checkpointInterval = strategy.checkpointInterval,
+        initVal = 1))
+    } else {
+      None
+    }
+
+    val nodeStack = new mutable.ArrayStack[(Int, LearningNode)]
+    val rng = new Random()
+    rng.setSeed(seed)
+
+    // Allocate and queue root nodes.
+    val topNodes = trainedModels.map(_.rootLearningNode)
+    val leafToExpand = mutable.ArrayBuffer[TransferLearningNode]()
+    topNodes.zipWithIndex.foreach(t => {
+      extractLeafNodes(t._1).foreach(leaf => {
+        nodeStack.push((t._2, leaf))
+        leafToExpand.append(leaf)
+      })
+    })
+
+    timer.stop("init")
+    while (nodeStack.nonEmpty) {
+      // Collect some nodes to split, and choose features for each node (if subsampling).
+      // Each group of nodes may come from one or multiple trees, and at multiple levels.
+      val (nodesForGroup, treeToNodeToIndexInfo) =
+      RandomForest.selectNodesToSplit(nodeStack, maxMemoryUsage, metadata, rng)
+      //      val indexInfo = treeToNodeToIndexInfo.values.flatMap(_.values).mkString(",")
+      //      println(s"indexInfo:$indexInfo")
+      // Sanity check (should never occur):
+      assert(nodesForGroup.nonEmpty,
+        s"RandomForest selected empty nodesForGroup.  Error for unknown reason.")
+
+      // Only send trees to worker if they contain nodes being split this iteration.
+      val topNodesForGroup: Map[Int, LearningNode] =
+        nodesForGroup.keys.map(treeIdx => treeIdx -> topNodes(treeIdx)).toMap
+
+      // Choose node splits, and enqueue new nodes as needed.
+      timer.start("findBestSplits")
+      TransferRandomForest.findBestSplits(baggedInput, metadata, topNodesForGroup, nodesForGroup,
+        treeToNodeToIndexInfo, splits, nodeStack, timer, nodeIdCache)
+      timer.stop("findBestSplits")
+    }
+
+    baggedInput.unpersist()
+
+    timer.stop("total")
+
+    logInfo("Internal timing for SER expansion:")
+    logInfo(s"$timer")
+
+    // Pruning
+    leafToExpand.foreach(expandedLeaf => {
+      // If the leaf error of current node is smaller than the expanded sub-tree,
+      // that means that if we do not expand current node, will get better result
+      // in the target dataset.
+      if (expandedLeaf.leftChild.nonEmpty) {
+        val leafError = Utils.leafError(expandedLeaf)
+        val subTreeError = Utils.subTreeError(expandedLeaf)
+        println(s"LeafErr:$leafError, SubTreeError:$subTreeError")
+        if (leafError < subTreeError) {
+          // Pruning this node
+          logWarning(s"Pruning node [${expandedLeaf.id}]")
+          expandedLeaf.leftChild = None
+          expandedLeaf.rightChild = None
+          expandedLeaf.isLeaf = true
+        }
+      }
+    })
+
+    val numFeatures = metadata.numFeatures
+
+    parentUID match {
+      case Some(uid) =>
+        topNodes.map { rootNode =>
+          new RichDecisionTreeClassificationModel(uid, rootNode.toNode, numFeatures,
+            strategy.getNumClasses, rootNode)
+        }
+      case None => topNodes.map { rootNode =>
+        new RichDecisionTreeClassificationModel(rootNode.toNode, numFeatures,
+          strategy.getNumClasses, rootNode)
+      }
+    }
+  }
+
   def transfer(trainedModel: RichDecisionTreeClassificationModel,
                target: RDD[LabeledPoint],
                strategy: OldStrategy,
@@ -253,13 +395,14 @@ object TransferRandomForest extends Logging {
     }
 
     val nodeStack = new mutable.ArrayStack[(Int, LearningNode)]
+    val rootNode = trainedModel.rootLearningNode
 
     val rng = new Random()
     rng.setSeed(seed)
 
-    println("trainedModel:" + trainedModel.rootLearningNode.toNode.subtreeToString(4))
+    println("trainedModel:\n" + rootNode.toNode.subtreeToString())
     // Add top node to stack
-    val topNodes = Array(trainedModel.rootLearningNode)
+    val topNodes = Array(rootNode)
     // push the leaf node into stack
     val leafToExpand = topNodes.flatMap(extractLeafNodes)
     leafToExpand.foreach(node => nodeStack.push((0, node)))
@@ -293,21 +436,37 @@ object TransferRandomForest extends Logging {
 
     logInfo("Internal timing for SER expansion:")
     logInfo(s"$timer")
-    println("After trainedModel" + trainedModel.rootLearningNode.toNode.subtreeToString(4))
+    println("After trainedModel\n" + trainedModel.rootLearningNode.toNode.subtreeToString())
     // Pruning
-    leafToExpand.foreach( expandedLeaf => {
+    leafToExpand.foreach(expandedLeaf => {
       // If the leaf error of current node is smaller than the expanded sub-tree,
       // that means that if we do not expand current node, will get better result
       // in the target dataset.
-      if (Utils.leafError(expandedLeaf) < Utils.subTreeError(expandedLeaf)) {
-        // Pruning this node
-        logWarning(s"Pruning node [${expandedLeaf.id}]")
-        expandedLeaf.leftChild = None
-        expandedLeaf.rightChild = None
-        expandedLeaf.isLeaf = true
+      if (expandedLeaf.leftChild.nonEmpty) {
+        val leafError = Utils.leafError(expandedLeaf)
+        val subTreeError = Utils.subTreeError(expandedLeaf)
+        println(s"LeafErr:$leafError, SubTreeError:$subTreeError")
+        if (leafError < subTreeError) {
+          // Pruning this node
+          logWarning(s"Pruning node [${expandedLeaf.id}]")
+          expandedLeaf.leftChild = None
+          expandedLeaf.rightChild = None
+          expandedLeaf.isLeaf = true
+        }
       }
     })
-    trainedModel
+    println("Pruned tree:\n" + trainedModel.rootLearningNode.toNode.subtreeToString())
+    //    trainedModel
+    val numFeatures = metadata.numFeatures
+
+    parentUID match {
+      case Some(uid) =>
+        new RichDecisionTreeClassificationModel(uid, rootNode.toNode, numFeatures,
+          strategy.getNumClasses, rootNode)
+      case None =>
+        new RichDecisionTreeClassificationModel(rootNode.toNode, numFeatures,
+          strategy.getNumClasses, rootNode)
+    }
   }
 
   private def extractLeafNodes(node: TransferLearningNode): Array[TransferLearningNode] = {
@@ -392,7 +551,7 @@ object TransferRandomForest extends Logging {
         val nodeIndexInfo = nodeIndexToInfo.getOrElse(nodeIndex, null)
         //        if (nodeIndexInfo == null) {
         //          println("nodeInfo is null....")
-        //          println(s"current tree:\n${topNodesForGroup(treeIndex).toNode.subtreeToString(4)}")
+        //          println(s"current tree:\n${topNodesForGroup(treeIndex).toNode.subtreeToString()}")
         //          println(s"binnedFeatures:${baggedPoint.datum.binnedFeatures.mkString(",")}, label:${baggedPoint.datum.label}")
         //        }
         nodeBinSeqOp(treeIndex, nodeIndexInfo, agg, baggedPoint)
@@ -483,7 +642,7 @@ object TransferRandomForest extends Logging {
           new DTStatsAggregator(metadata, featuresForNode)
         }
         // iterator all instances in current partition and update aggregate stats
-        println(s"Evaluating input data to bins")
+        //        println(s"Evaluating input data to bins")
         // 两次的points数据一模一样啊
         points.foreach(point => {
           //          println(s"Points:${point.datum.binnedFeatures.mkString(",")},Feature:${point.datum.label}")
@@ -539,7 +698,7 @@ object TransferRandomForest extends Logging {
           case _ =>
         }
         logDebug("Node = " + node)
-//        logWarning(s"Node [${node.id}] predict[${node.stats.impurityCalculator.predict}] error stats:$parentError")
+        //        logWarning(s"Node [${node.id}] predict[${node.stats.impurityCalculator.predict}] error stats:$parentError")
 
         if (!isLeaf) {
           node.split = Some(split)
@@ -616,30 +775,48 @@ object TransferRandomForest extends Logging {
             splitIndex += 1
           }
           // Find best split.
-          val (bestFeatureSplitIndex, bestFeatureGainStats) =
+          val (bestFeatureSplitIndex, bestFeatureGainStats, bestSplitError) =
             Range(0, numSplits).map { splitIdx =>
               val leftChildStats = binAggregates.getImpurityCalculator(nodeFeatureOffset, splitIdx)
               val rightChildStats =
                 binAggregates.getImpurityCalculator(nodeFeatureOffset, numSplits)
               rightChildStats.subtract(leftChildStats)
+              val lStats = leftChildStats.stats
+              val rStats = rightChildStats.stats
+              val splitDataStats = Array
+                .tabulate(lStats.length) { idx => lStats(idx) + rStats(idx) }
+
               gainAndImpurityStats = calculateImpurityStats(gainAndImpurityStats,
                 leftChildStats, rightChildStats, binAggregates.metadata)
-              (splitIdx, gainAndImpurityStats)
+              val parentError = Utils.calcClassificationError(splitDataStats, gainAndImpurityStats.impurityCalculator.predict)
+              val lError = Utils.calcClassificationError(lStats, leftChildStats.predict)
+              val rError = Utils.calcClassificationError(rStats, rightChildStats.predict)
+
+              (splitIdx, gainAndImpurityStats, (parentError, lError, rError))
             }.maxBy(_._2.gain)
-          (splits(featureIndex)(bestFeatureSplitIndex), bestFeatureGainStats, null)
+          (splits(featureIndex)(bestFeatureSplitIndex), bestFeatureGainStats, bestSplitError)
         } else if (binAggregates.metadata.isUnordered(featureIndex)) {
           // Unordered categorical feature
           val leftChildOffset = binAggregates.getFeatureOffset(featureIndexIdx)
-          val (bestFeatureSplitIndex, bestFeatureGainStats) =
+          val (bestFeatureSplitIndex, bestFeatureGainStats, bestSplitError) =
             Range(0, numSplits).map { splitIndex =>
               val leftChildStats = binAggregates.getImpurityCalculator(leftChildOffset, splitIndex)
               val rightChildStats = binAggregates.getParentImpurityCalculator()
                 .subtract(leftChildStats)
+              val lStats = leftChildStats.stats
+              val rStats = rightChildStats.stats
+              val splitDataStats = Array
+                .tabulate(lStats.length) { idx => lStats(idx) + rStats(idx) }
+
               gainAndImpurityStats = calculateImpurityStats(gainAndImpurityStats,
                 leftChildStats, rightChildStats, binAggregates.metadata)
-              (splitIndex, gainAndImpurityStats)
+              val parentError = Utils.calcClassificationError(splitDataStats, gainAndImpurityStats.impurityCalculator.predict)
+              val lError = Utils.calcClassificationError(lStats, leftChildStats.predict)
+              val rError = Utils.calcClassificationError(rStats, rightChildStats.predict)
+
+              (splitIndex, gainAndImpurityStats, (parentError, lError, rError))
             }.maxBy(_._2.gain)
-          (splits(featureIndex)(bestFeatureSplitIndex), bestFeatureGainStats, null)
+          (splits(featureIndex)(bestFeatureSplitIndex), bestFeatureGainStats, bestSplitError)
         } else {
           // Ordered categorical feature
           val nodeFeatureOffset = binAggregates.getFeatureOffset(featureIndexIdx)
@@ -714,17 +891,18 @@ object TransferRandomForest extends Logging {
               // For binary classification, we count error using these bin stats we collected
               val lStats = leftChildStats.stats
               val rStats = rightChildStats.stats
-              val Array(falseCount, trueCount) = Array
-                .tabulate(2) { idx => lStats(idx) + rStats(idx) }
+              require(lStats.length == rStats.length)
+              val splitDataStats = Array
+                .tabulate(lStats.length) { idx => lStats(idx) + rStats(idx) }
               //              println(s"FalseCount:$falseCount, TrueCount:$trueCount")
               //              println(s"leftChildStats.stats:${lStats.mkString(",")}")
               //              println(s"rightChildStats.stats:${rStats.mkString(",")}")
               gainAndImpurityStats = calculateImpurityStats(gainAndImpurityStats,
                 leftChildStats, rightChildStats, binAggregates.metadata)
-              val parentError = Utils.calcClassificationError(Array(falseCount, trueCount), gainAndImpurityStats.impurityCalculator.predict)
+              val parentError = Utils.calcClassificationError(splitDataStats, gainAndImpurityStats.impurityCalculator.predict)
               val lError = Utils.calcClassificationError(lStats, leftChildStats.predict)
               val rError = Utils.calcClassificationError(rStats, rightChildStats.predict)
-//              println(s"Parent [$parentError], l [$lError], r [$rError]")
+              //              println(s"Parent [$parentError], l [$lError], r [$rError]")
               (splitIndex, gainAndImpurityStats, (parentError, lError, rError))
             }.maxBy(_._2.gain)
           // 在这算该节点的error吧

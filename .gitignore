@@ -64,3 +64,6 @@ src/main/resources/MNIST
 src/main/resources/letter
 # ignore test properties
 core/src/test/resources/tidb_config.properties
+src/main/resources/digits
+src/main/resources/wine
+src/main/resources

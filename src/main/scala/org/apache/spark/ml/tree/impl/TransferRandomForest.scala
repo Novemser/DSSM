@@ -186,13 +186,13 @@ object TransferRandomForest extends Logging {
   }
 
   def transferModels(trainedModels: Array[RichDecisionTreeClassificationModel],
-               target: RDD[LabeledPoint],
-               strategy: OldStrategy,
-               numTrees: Int,
-               featureSubsetStrategy: String,
-               seed: Long,
-               instr: Option[Instrumentation[_]],
-               parentUID: Option[String] = None): Array[RichDecisionTreeClassificationModel] = {
+                     target: RDD[LabeledPoint],
+                     strategy: OldStrategy,
+                     numTrees: Int,
+                     featureSubsetStrategy: String,
+                     seed: Long,
+                     instr: Option[Instrumentation[_]],
+                     parentUID: Option[String] = None): Array[RichDecisionTreeClassificationModel] = {
     val timer = new TimeTracker()
 
     timer.start("total")
@@ -301,7 +301,7 @@ object TransferRandomForest extends Logging {
       if (expandedLeaf.leftChild.nonEmpty) {
         val leafError = Utils.leafError(expandedLeaf)
         val subTreeError = Utils.subTreeError(expandedLeaf)
-        println(s"LeafErr:$leafError, SubTreeError:$subTreeError")
+//        println(s"LeafErr:$leafError, SubTreeError:$subTreeError")
         if (leafError < subTreeError) {
           // Pruning this node
           logWarning(s"Pruning node [${expandedLeaf.id}]")
@@ -473,7 +473,7 @@ object TransferRandomForest extends Logging {
     if (node.leftChild.isEmpty && node.rightChild.isEmpty) {
       // Reset node statistic info to null for the following calculation
       node.stats = null
-      println(s"Capture node [${node.id}], error {${node.error}")
+      //      println(s"Capture node [${node.id}], error {${node.error}")
       return Array(node)
     }
     extractLeafNodes(node.leftChild.get.asInstanceOf[TransferLearningNode]) ++

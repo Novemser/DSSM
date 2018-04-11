@@ -10,9 +10,10 @@ import org.apache.spark.ml.linalg.{Vector, Vectors}
 import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.tree.impl.Utils
 import org.apache.spark.ml.tuning.{CrossValidator, ParamGridBuilder}
+import org.apache.spark.ml.util.MetadataUtils
 import org.apache.spark.ml.{Pipeline, PipelineModel}
 import org.apache.spark.mllib.tree.RandomForest
-import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
 
 import scala.collection.mutable
 
@@ -201,6 +202,69 @@ object LearnMLlib {
 
   }
 
+  def testWine(): Unit = {
+    val red = spark
+      .read
+      .option("header", "true")
+      .option("inferSchema", value = true)
+      .csv("src/main/resources/wine/red.csv")
+
+    val white = spark
+      .read
+      .option("header", "true")
+      .option("inferSchema", value = true)
+      .csv("src/main/resources/wine/white.csv")
+
+//    val trainData = red
+//    val testData = white
+    val trainData = white
+    val testData = red
+
+    doExperiment(red, white, white)
+  }
+
+  def testDigits(): Unit = {
+    val d6 = spark
+      .read
+      .option("header", "true")
+      .option("inferSchema", value = true)
+      .csv("src/main/resources/digits/optdigits_6.csv")
+
+    val d9 = spark
+      .read
+      .option("header", "true")
+      .option("inferSchema", value = true)
+      .csv("src/main/resources/digits/optdigits_9.csv")
+
+    doExperiment(d6, d9, d6)
+  }
+
+  def testLandMine():Unit = {
+    val mine = mutable.ArrayBuffer[DataFrame]()
+    Range(1, 30)
+      .map(i => s"src/main/resources/landMine/minefield$i.csv")
+      .foreach(path => {
+        val data = spark
+          .read
+          .option("header", "true")
+          .option("inferSchema", value = true)
+          .csv(path)
+        mine += data
+      })
+
+    val source = mine.take(15).reduce { _ union _ }
+    val data = mine.takeRight(14)
+
+    val res = Range(0, 14).map(_ => {
+      val target = data.remove(0)
+      val test = data.reduce { _ union _ }
+      val (srcAcc, serAcc) = doExperiment(source, target, test, berr = true)
+      data += target
+      (srcAcc, serAcc)
+    }).reduce((l, r) => (l._1 + r._1, l._2 + r._2))
+    println(s"src acc:${res._1 / 14}, ser acc:${res._2 / 14}")
+  }
+
   def testLetter(): Unit = {
     val data = spark
       .read
@@ -208,54 +272,80 @@ object LearnMLlib {
       .option("inferSchema", true)
       .csv("src/main/resources/letter/letter-recognition.csv")
 
-    var Array(trainData, testData) = data.randomSplit(Array(1.0, 0.0))
-    val x2barmean = trainData.groupBy("class").agg("x2bar" -> "mean").collect().sortBy(_.getString(0))
+//    var Array(trainData, testData) = data.randomSplit(Array(1.0, 0.0))
+    val x2barmean = data.groupBy("class").agg("x2bar" -> "mean").collect().sortBy(_.getString(0))
 
-    testData = trainData.filter(row => {
+    val filterFunc: Row => Boolean = row => {
       val x2bar = row.getInt(7)
       val mean = x2barmean.filter(keyMean => keyMean.getString(0).equalsIgnoreCase(row.getString(16))).head.getDouble(1)
       x2bar <= mean
-    })
+    }
 
-    println(
-      s"trainData.count():${trainData.count()}\ntestData.count():${testData.count()}"
-    )
+//    val testData = data.filter(filterFunc)
+//    val trainData = data.filter(r => !filterFunc(r))
+    val testData = data.filter(r => !filterFunc(r))
+    val trainData = data.filter(filterFunc)
 
     //    x2barmean.cache()
-    println(s"mean(${x2barmean.length}):${x2barmean.mkString(",")}")
+//    println(s"mean(${x2barmean.length}):${x2barmean.mkString(",")}")
 
-    val labelIndexer = new StringIndexer()
+    doExperiment(trainData, testData, testData)
+  }
+
+  def doExperiment(source: DataFrame, target: DataFrame, test: DataFrame, berr: Boolean = false):(Double, Double) = {
+    printInfo(source, target, test)
+
+    val trainLabelIndexer = new StringIndexer()
       .setHandleInvalid("skip")
       .setInputCol("class")
       .setOutputCol("label")
       .setStringOrderType("alphabetAsc")
-      .fit(trainData)
+      .fit(source)
 
-    val assembler = new VectorAssembler()
-      .setInputCols(trainData.schema.map(_.name).filter(s => s != "class").toArray)
+    val transferLabelIndexer = new StringIndexer()
+      .setHandleInvalid("skip")
+      .setInputCol("class")
+      .setOutputCol("label")
+      .setStringOrderType("alphabetAsc")
+      .fit(target)
+
+    val trainAssembler = new VectorAssembler()
+      .setInputCols(source.schema.map(_.name).filter(s => s != "class").toArray)
       .setOutputCol("features")
 
-    val rf = new TransferRandomForestClassifier()
-    rf.setFeaturesCol { assembler.getOutputCol }
-      .setLabelCol { labelIndexer.getOutputCol }
-      .setNumTrees(50)
+    val transferAssembler = trainAssembler
 
-    rf.splitFunction = point => {
-//      true
-      point.features.toArray(7) > x2barmean(point.label.toInt).getDouble(1)
-//      ThreadLocalRandom.current().nextBoolean()
-    }
+    val rf = new SourceRandomForestClassifier()
+    rf.setFeaturesCol { trainAssembler.getOutputCol }
+      .setLabelCol { trainLabelIndexer.getOutputCol }
+      .setNumTrees(50)
 
     // Convert indexed labels back to original labels.
     val labelConverter = new IndexToString()
       .setInputCol("prediction")
       .setOutputCol("predictedLabel")
-      .setLabels(labelIndexer.labels)
+      .setLabels(trainLabelIndexer.labels)
 
-    val pipeline = new Pipeline()
-      .setStages(Array(labelIndexer, assembler, rf, labelConverter))
+    val trainPipeline = new Pipeline()
+      .setStages(Array(trainLabelIndexer, trainAssembler, rf, labelConverter))
 
-    Utils.trainAndTest(pipeline, trainData, testData)
+    val srcAcc = Utils.trainAndTest(trainPipeline, source, test, berr)
+
+    val ser = new TargetRandomForestClassifier(rf.model)
+      .setFeaturesCol { trainAssembler.getOutputCol }
+      .setLabelCol { trainLabelIndexer.getOutputCol }
+
+    val transferPipeline = new Pipeline()
+      .setStages(Array(transferLabelIndexer, transferAssembler, ser, labelConverter))
+
+    val transferAcc = Utils.trainAndTest(transferPipeline, target, test, berr)
+    println(s"SrcOnly acc:$srcAcc, SER acc:$transferAcc")
+    // Using b error mentioned in paper
+    if (berr) {
+      (srcAcc._1, transferAcc._1)
+    } else {
+      (srcAcc._2, transferAcc._2)
+    }
   }
 
   def testLoadToDT(path: String): Unit = {
@@ -419,11 +509,22 @@ object LearnMLlib {
     println(s"Accuracy: $accuracy")
   }
 
+  def printInfo(sourceData: DataFrame, targetData: DataFrame, testData: DataFrame): Unit = {
+    println(
+      s"Source data.count:${sourceData.count()}\n " +
+        s"Target data.count:${targetData.count()}\n " +
+        s"Test data.count:${testData.count()}"
+    )
+  }
+
   def main(args: Array[String]): Unit = {
-    testLetter()
+    //    testLetter()
+//    testWine()
+//    testDigits()
+    testLandMine()
     //    pipeline()
     //    testDT()
-//    testLoadToDT("/home/novemser/Documents/Code/DSSM/src/main/resources/mushroom/mushroom.csv")
+    //    testLoadToDT("/home/novemser/Documents/Code/DSSM/src/main/resources/mushroom/mushroom.csv")
     //    testMyTree("/home/novemser/Documents/Code/DSSM/src/main/resources/mushroom/mushroom.csv")
     //    testMyTree("/home/novemser/Documents/Code/DSSM/src/main/resources/simple/load.csv")
   }

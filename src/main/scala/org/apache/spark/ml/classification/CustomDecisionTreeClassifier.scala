@@ -3,8 +3,8 @@ package org.apache.spark.ml.classification
 import org.apache.spark.ml.feature.LabeledPoint
 import org.apache.spark.ml.linalg.Vector
 import org.apache.spark.ml.param.ParamMap
-import org.apache.spark.ml.tree.{DecisionTreeClassifierParams, RandomForestClassifierParams}
-import org.apache.spark.ml.tree.impl.{RandomForest, RichDecisionTreeClassificationModel, TransferRandomForest}
+import org.apache.spark.ml.tree.RandomForestClassifierParams
+import org.apache.spark.ml.tree.impl.{RichDecisionTreeClassificationModel, SERTransfer, TransferRandomForest}
 import org.apache.spark.ml.util.{DefaultParamsWritable, Identifiable, Instrumentation, MetadataUtils}
 import org.apache.spark.mllib.tree.configuration.{Algo => OldAlgo, Strategy => OldStrategy}
 import org.apache.spark.rdd.RDD
@@ -55,8 +55,8 @@ class CustomDecisionTreeClassifier(val uid: String)
     val m = trees.head
     instr.logSuccess(m)
     println("Transfer----------------------------------------------")
-    m
-    val res = TransferRandomForest.transfer(m.asInstanceOf[RichDecisionTreeClassificationModel], tgt, strategy, numTrees = 1,
+
+    val res = SERTransfer.transfer(m.asInstanceOf[RichDecisionTreeClassificationModel], tgt, strategy, numTrees = 1,
       featureSubsetStrategy = "all", seed = $(seed), instr = Some(instr), parentUID = Some(uid))
     res
   }

@@ -6,9 +6,6 @@ import org.apache.spark.ml.tree._
 import org.apache.spark.ml.tree.model.ClassificationError
 import org.apache.spark.sql.{DataFrame, Dataset, Row}
 
-import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
-
 object Utils {
   def predictImpl(rootNode: LearningNode, binnedFeatures: Array[Int], splits: Array[Array[Split]]): LearningNode = {
     if (rootNode.isLeaf || rootNode.split.isEmpty) {
@@ -29,6 +26,12 @@ object Utils {
     }
   }
 
+  /**
+    * Calculate the error rate of one prediction.
+    *
+    * @param stats   label data array
+    * @param predict prediction
+    */
   def calcClassificationError(stats: Array[Double], predict: Double): ClassificationError = {
     val predictCount = stats(predict.toInt)
     ClassificationError(predictCount, stats.sum)
@@ -66,7 +69,11 @@ object Utils {
     println(s"Predict time ${e - s}")
     // Select example rows to display.
 //    predictions.select("prediction", "predictedLabel", "label", "class").show(50, truncate = false)
-    val bErr = berr(predictions.select("prediction", "label"), 2)
+    val bErr = if (withBErr) {
+      berr(predictions.select("prediction", "label"), 2)
+    } else {
+      0.0d
+    }
     val evaluator = new MulticlassClassificationEvaluator()
       .setLabelCol("label")
       .setPredictionCol("prediction")

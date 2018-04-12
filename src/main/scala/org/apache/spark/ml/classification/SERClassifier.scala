@@ -1,14 +1,14 @@
 package org.apache.spark.ml.classification
 
 import org.apache.spark.ml.feature.LabeledPoint
-import org.apache.spark.ml.tree.impl.{RichDecisionTreeClassificationModel, TransferRandomForest}
+import org.apache.spark.ml.tree.impl.{RichDecisionTreeClassificationModel, SERTransfer, TransferRandomForest}
 import org.apache.spark.ml.util.{Instrumentation, MetadataUtils}
 import org.apache.spark.mllib.tree.configuration.Algo
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.Dataset
 
-class TargetRandomForestClassifier(source: RichRandomForestClassificationModel)
-  extends RandomForestClassifier {
+class SERClassifier(source: RichRandomForestClassificationModel)
+  extends SingleSourceModelTransfer {
 
   setNumTrees(source._trees.length)
 
@@ -33,7 +33,7 @@ class TargetRandomForestClassifier(source: RichRandomForestClassificationModel)
       impurity, numTrees, featureSubsetStrategy, maxDepth, maxBins, maxMemoryInMB, minInfoGain,
       minInstancesPerNode, seed, subsamplingRate, thresholds, cacheNodeIds, checkpointInterval)
 
-    val transferTrees = TransferRandomForest
+    val transferTrees = SERTransfer
       .transferModels(source._trees.map(_.asInstanceOf[RichDecisionTreeClassificationModel]),
         oldDataset, strategy, getNumTrees, getFeatureSubsetStrategy, getSeed, Some(instr))
 

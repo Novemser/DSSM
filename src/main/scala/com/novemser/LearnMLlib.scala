@@ -1,7 +1,5 @@
 package com.novemser
 
-import java.util.concurrent.ThreadLocalRandom
-
 import org.apache.spark.SparkConf
 import org.apache.spark.ml.classification._
 import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
@@ -9,13 +7,18 @@ import org.apache.spark.ml.feature._
 import org.apache.spark.ml.linalg.{Vector, Vectors}
 import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.tree.impl.Utils
-import org.apache.spark.ml.tuning.{CrossValidator, ParamGridBuilder}
-import org.apache.spark.ml.util.MetadataUtils
 import org.apache.spark.ml.{Pipeline, PipelineModel}
-import org.apache.spark.mllib.tree.RandomForest
-import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
+import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 
 import scala.collection.mutable
+
+trait Type
+
+case class SER() extends Type
+
+case class STRUT() extends Type
+
+case class DSSM() extends Type
 
 object LearnMLlib {
   private val conf = new SparkConf()
@@ -220,7 +223,80 @@ object LearnMLlib {
     val trainData = white
     val testData = red
 
-    doExperiment(red, white, white)
+    doExperiment(white, red, red)
+  }
+
+  def testNumeric(): Unit = {
+    val data = spark
+      .read
+      .option("header", "true")
+      .option("inferSchema", value = true)
+      .csv("src/main/resources/simple/numeric.csv")
+
+    doExperiment(data, data, data, numTrees = 1, treeType = STRUT())
+  }
+
+  def testMushroom(): Unit = {
+    val data = spark
+      .read
+      .option("header", "true")
+      .option("inferSchema", value = true)
+      .csv("src/main/resources/mushroom/mushroom.csv")
+
+    val trainData = data.filter("`stalk-shape` = 'e'") // 3516
+    val testData = data.filter("`stalk-shape` = 't'") // 4608
+    val indexers = mutable.ArrayBuffer[StringIndexerModel]()
+    data.schema.map(_.name).filter(_ != "id").filter(_ != "class").foreach((name: String) => {
+      val stringIndexer = new StringIndexer()
+        .setInputCol(name)
+        .setHandleInvalid("keep")
+        .setOutputCol(s"indexed_$name")
+        .fit(trainData)
+      indexers += stringIndexer
+    })
+
+    val trainLabelIndexer = new StringIndexer()
+      .setHandleInvalid("skip")
+      .setInputCol("class")
+      .setOutputCol("label")
+      .fit(trainData)
+
+    val transferLabelIndexer = new StringIndexer()
+      .setHandleInvalid("skip")
+      .setInputCol("class")
+      .setOutputCol("label")
+      .fit(testData)
+
+    val trainAssembler = new VectorAssembler()
+      .setInputCols(indexers.map(_.getOutputCol).toArray)
+      .setOutputCol("features")
+
+    val transferAssembler = trainAssembler
+
+    val rf = new SourceRandomForestClassifier()
+    rf.setFeaturesCol { trainAssembler.getOutputCol }
+      .setLabelCol { trainLabelIndexer.getOutputCol }
+      .setNumTrees(50)
+
+    val labelConverter = new IndexToString()
+      .setInputCol("prediction")
+      .setOutputCol("predictedLabel")
+      .setLabels(trainLabelIndexer.labels)
+
+    val pipeline = new Pipeline()
+      .setStages(indexers.toArray ++ Array(trainLabelIndexer, trainAssembler, rf, labelConverter))
+    // Train model. This also runs the indexers.
+    val srcAcc = Utils.trainAndTest(pipeline, trainData, testData)
+
+    val ser = new SERClassifier(rf.model)
+      .setFeaturesCol { trainAssembler.getOutputCol }
+      .setLabelCol { trainLabelIndexer.getOutputCol }
+
+    val transferPipeline = new Pipeline()
+      .setStages(indexers.toArray ++ Array(transferLabelIndexer, transferAssembler, ser, labelConverter))
+
+    val transferAcc = Utils.trainAndTest(transferPipeline, testData, testData)
+    println(s"SrcOnly acc:$srcAcc, SER acc:$transferAcc")
   }
 
   def testDigits(): Unit = {
@@ -236,7 +312,7 @@ object LearnMLlib {
       .option("inferSchema", value = true)
       .csv("src/main/resources/digits/optdigits_9.csv")
 
-    doExperiment(d6, d9, d6)
+    doExperiment(d6, d6, d6)
   }
 
   def testLandMine():Unit = {
@@ -292,7 +368,13 @@ object LearnMLlib {
     doExperiment(trainData, testData, testData)
   }
 
-  def doExperiment(source: DataFrame, target: DataFrame, test: DataFrame, berr: Boolean = false):(Double, Double) = {
+  def doExperiment(source: DataFrame,
+                   target: DataFrame,
+                   test: DataFrame,
+                   berr: Boolean = false,
+                   numTrees: Int = 50,
+                   treeType: Type = SER(),
+                   maxDepth:Int = 10):(Double, Double) = {
     printInfo(source, target, test)
 
     val trainLabelIndexer = new StringIndexer()
@@ -318,7 +400,8 @@ object LearnMLlib {
     val rf = new SourceRandomForestClassifier()
     rf.setFeaturesCol { trainAssembler.getOutputCol }
       .setLabelCol { trainLabelIndexer.getOutputCol }
-      .setNumTrees(50)
+      .setMaxDepth(maxDepth)
+      .setNumTrees(numTrees)
 
     // Convert indexed labels back to original labels.
     val labelConverter = new IndexToString()
@@ -331,17 +414,24 @@ object LearnMLlib {
 
     val srcAcc = Utils.trainAndTest(trainPipeline, source, test, berr)
 
-    val ser = new TargetRandomForestClassifier(rf.model)
+    val classifier = treeType match {
+      case SER() => new SERClassifier(rf.model)
+      case STRUT() => new STRUTClassifier(rf.model)
+      case _ => null
+    }
+
+    classifier
       .setFeaturesCol { trainAssembler.getOutputCol }
       .setLabelCol { trainLabelIndexer.getOutputCol }
+      .setMaxDepth { maxDepth }
 
     val transferPipeline = new Pipeline()
-      .setStages(Array(transferLabelIndexer, transferAssembler, ser, labelConverter))
+      .setStages(Array(transferLabelIndexer, transferAssembler, classifier, labelConverter))
 
     val transferAcc = Utils.trainAndTest(transferPipeline, target, test, berr)
     println(s"SrcOnly acc:$srcAcc, SER acc:$transferAcc")
     // Using b error mentioned in paper
-    if (berr) {
+    if (!berr) {
       (srcAcc._1, transferAcc._1)
     } else {
       (srcAcc._2, transferAcc._2)
@@ -388,7 +478,6 @@ object LearnMLlib {
     val rf =
       new CustomDecisionTreeClassifier()
 //      new RandomForestClassifier()
-      .setNumTrees(50)
       .setFeaturesCol(assembler.getOutputCol)
       .setLabelCol(labelIndexer.getOutputCol)
 //      .setMaxBins(100)
@@ -441,6 +530,22 @@ object LearnMLlib {
     //    val acc2 = evaluator.evaluate(transformed)
     //    println(s"Acc2: $acc2")
     //    data.show(10, truncate = false)
+  }
+
+  def testStrut(): Unit = {
+    val d6 = spark
+      .read
+      .option("header", "true")
+      .option("inferSchema", value = true)
+      .csv("src/main/resources/digits/optdigits_6.csv")
+
+    val d9 = spark
+      .read
+      .option("header", "true")
+      .option("inferSchema", value = true)
+      .csv("src/main/resources/digits/optdigits_9.csv")
+
+    doExperiment(d6, d9, d9, treeType = STRUT(), maxDepth = 5)
   }
 
   def testMyTree(path: String): Unit = {
@@ -518,10 +623,13 @@ object LearnMLlib {
   }
 
   def main(args: Array[String]): Unit = {
-    //    testLetter()
+//    testNumeric()
+    testStrut()
+//    testLetter()
 //    testWine()
 //    testDigits()
-    testLandMine()
+//    testLandMine()
+//    testMushroom()
     //    pipeline()
     //    testDT()
     //    testLoadToDT("/home/novemser/Documents/Code/DSSM/src/main/resources/mushroom/mushroom.csv")

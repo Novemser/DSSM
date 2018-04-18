@@ -120,7 +120,10 @@ object TransferRandomForest extends Logging {
 
     timer.stop("init")
 
+    var iterCount = 0
     while (nodeStack.nonEmpty) {
+      println(s"iterCount:$iterCount")
+      iterCount += 1
       // Collect some nodes to split, and choose features for each node (if subsampling).
       // Each group of nodes may come from one or multiple trees, and at multiple levels.
       val (nodesForGroup, treeToNodeToIndexInfo) =
@@ -349,11 +352,12 @@ object TransferRandomForest extends Logging {
         // iterator all instances in current partition and update aggregate stats
         //        println(s"Evaluating input data to bins")
         // 两次的points数据一模一样啊
+        var count = 0
         points.foreach(point => {
-          //          println(s"Points:${point.datum.binnedFeatures.mkString(",")},Feature:${point.datum.label}")
+          count += 1
           binSeqOp(nodeStatsAggregators, point)
         })
-        //        println("2333333")
+        println(s"Point Count:$count")
 
         // transform nodeStatsAggregators array to (nodeIndex, nodeAggregateStats) pairs,
         // which can be combined with other partition using `reduceByKey`

@@ -4,7 +4,6 @@ import org.apache.spark.ml.feature.LabeledPoint
 import org.apache.spark.ml.tree._
 import org.apache.spark.ml.tree.impl.RandomForest.NodeIndexInfo
 import org.apache.spark.ml.tree.impl.TransferRandomForest._
-import org.apache.spark.ml.tree.model.ErrorStats
 import org.apache.spark.ml.util.Instrumentation
 import org.apache.spark.mllib.tree.configuration.Strategy
 import org.apache.spark.mllib.tree.model.ImpurityStats
@@ -86,29 +85,31 @@ object STRUTTransfer extends ModelTransfer {
 
     // First extract all nodes for threshold tuning
     val topNodes = trainedModels.map(_.rootLearningNode)
-    val nodesToCalculate = topNodes.flatMap(node => {
-      val nodes = mutable.ArrayBuffer[TransferLearningNode]()
-      if (node.leftChild.nonEmpty) {
-        nodes.append(node.leftChild.get.asInstanceOf[TransferLearningNode])
-      }
-      if (node.rightChild.nonEmpty) {
-        nodes.append(node.rightChild.get.asInstanceOf[TransferLearningNode])
-      }
-      nodes
-    })
     // 记录在source数据上所有节点的stats信息
+    // (treeIndex, nodeIndex) -> node stats
     val oldNodeStatsInfoMap = mutable.Map[(Int, Int), ImpurityStats]()
     val newNodeStatsInfoMap = mutable.Map[(Int, Int), ImpurityStats]()
+    val isNodeFeatureContinuousMap = mutable.Map[(Int, Int), Boolean]()
 
     // Extract old stats info before
     topNodes.zipWithIndex.foreach(t => {
+      val topNode = t._1
+      val topNodeIndex = t._2
       val statsInfoMap = mutable.Map[TransferLearningNode, ImpurityStats]()
-      extractNodes(t._1, statsInfoMap).foreach(leaf => {
-        nodeStack.push((t._2, leaf))
+      extractNodes(topNode, statsInfoMap).foreach(leaf => {
+        nodeStack.push((topNodeIndex, leaf))
       })
 
       statsInfoMap.foreach((tuple: (TransferLearningNode, ImpurityStats)) => {
-        oldNodeStatsInfoMap((t._2, tuple._1.id)) = tuple._2
+        val node = tuple._1
+        val nodeStats = tuple._2
+        val nodeSplit = node.split
+        oldNodeStatsInfoMap((topNodeIndex, node.id)) = nodeStats
+        // Note that leaf nodes do not have node split info
+        if (nodeSplit.nonEmpty) {
+          isNodeFeatureContinuousMap((topNodeIndex, node.id)) =
+            metadata.isContinuous(nodeSplit.get.featureIndex)
+        }
       })
     })
 
@@ -134,6 +135,7 @@ object STRUTTransfer extends ModelTransfer {
       timer.stop("calculateNewSplitsStats")
     }
 
+    println("After transferring")
     // Extract new stats info
     topNodes.zipWithIndex.foreach(t => {
       val statsInfoMap = mutable.Map[TransferLearningNode, ImpurityStats]()
@@ -144,27 +146,37 @@ object STRUTTransfer extends ModelTransfer {
       })
     })
 
+    // After transferring
     oldNodeStatsInfoMap.keys
-      .map((key: (Int, Int)) =>(oldNodeStatsInfoMap(key), newNodeStatsInfoMap(key)))
-      .filter((stats: (ImpurityStats, ImpurityStats)) =>
+      .filter {
+        isNodeFeatureContinuousMap.contains
+      }
+      .map { (key: (Int, Int)) =>
+        (oldNodeStatsInfoMap(key), newNodeStatsInfoMap(key), isNodeFeatureContinuousMap(key))
+      }
+      .filter { (stats: (ImpurityStats, ImpurityStats, Boolean)) =>
         stats._1.leftImpurityCalculator != null &&
-        stats._2.leftImpurityCalculator != null)
-      .foreach((stats: (ImpurityStats, ImpurityStats)) => {
-      val oldStats = stats._1
-      val newStats = stats._2
+          stats._2.leftImpurityCalculator != null
+      }
+      .foreach { (stats: (ImpurityStats, ImpurityStats, Boolean)) => {
+        val oldStats = stats._1
+        val newStats = stats._2
 
-      val oldLeft = oldStats.leftImpurityCalculator.stats
-      val oldRight = oldStats.rightImpurityCalculator.stats
-      val newLeft = newStats.leftImpurityCalculator.stats
-      val newRight = newStats.rightImpurityCalculator.stats
+        val oldLeft = oldStats.leftImpurityCalculator.stats
+        val oldRight = oldStats.rightImpurityCalculator.stats
+        val newLeft = newStats.leftImpurityCalculator.stats
+        val newRight = newStats.rightImpurityCalculator.stats
 
-      val calculator =
-        new JensenShannonDistance
+        val calculator =
+          new JensenShannonDistance
 
-      val jsdL = calculator.d(oldLeft, newLeft)
-      val jsdR = calculator.d(oldRight, newRight)
-      println(s"jsdL:$jsdL, jsdR:$jsdR")
-    })
+        val jsdL = calculator.d(oldLeft, newLeft)
+        val jsdR = calculator.d(oldRight, newRight)
+        println(s"jsdL:$jsdL, jsdR:$jsdR")
+
+      }}
+
+    // TODO: Prune unreachable nodes
 
     val numFeatures = metadata.numFeatures
 
@@ -215,10 +227,14 @@ object STRUTTransfer extends ModelTransfer {
                  baggedPoint: BaggedPoint[TreePoint]): Array[DTStatsAggregator] = {
       // Iterate over all nodes in this data pass
       treeToNodeToIndexInfo.foreach { case (treeIndex, nodeIndexToInfo) =>
-        val nodeIndex =
-          topNodesForGroup(treeIndex).predictImpl(baggedPoint.datum.binnedFeatures, splits)
-        val nodeIndexInfo = nodeIndexToInfo.getOrElse(nodeIndex, null)
-        nodeBinSeqOp(treeIndex, nodeIndexInfo, agg, baggedPoint)
+        val path = topNodesForGroup(treeIndex).asInstanceOf[TransferLearningNode]
+          .predictPath(baggedPoint.datum.binnedFeatures, splits)
+        //        println(s"path for node:${path.mkString(",")}")
+        // We need to add current point info into all nodes in it's prediction path.
+        path.foreach(nodeIndex => {
+          val nodeIndexInfo = nodeIndexToInfo.getOrElse(nodeIndex, null)
+          nodeBinSeqOp(treeIndex, nodeIndexInfo, agg, baggedPoint)
+        })
       }
       agg
     }
@@ -289,9 +305,12 @@ object STRUTTransfer extends ModelTransfer {
           }
           new DTStatsAggregator(metadata, featuresForNode)
         }
+        //        var count = 0
         points.foreach(point => {
+          //          count += 1
           binSeqOp(nodeStatsAggregators, point)
         })
+        //        println(s"Point Count:$count")
         nodeStatsAggregators.zipWithIndex.map(_.swap).iterator
       }
     }
@@ -502,13 +521,14 @@ object STRUTTransfer extends ModelTransfer {
       }
     (bestSplit, bestSplitStats)
     // we do not care error here
-//    node.asInstanceOf[TransferLearningNode].error = bestSplitError._1
+    //    node.asInstanceOf[TransferLearningNode].error = bestSplitError._1
   }
 
   private def extractNodes(node: TransferLearningNode,
                            nodeStatsInfoMap: mutable.Map[TransferLearningNode, ImpurityStats],
                            invalidateStats: Boolean = true): Array[TransferLearningNode] = {
     nodeStatsInfoMap(node) = node.stats
+    //    println(s"Node:${node.id}, data count:${node.stats.impurityCalculator.count}")
     if (invalidateStats) node.stats = null
     if (node.leftChild.isEmpty && node.rightChild.isEmpty) {
       Array(node)

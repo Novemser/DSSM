@@ -14,11 +14,17 @@ import scala.collection.mutable
 
 trait Type
 
-case class SER() extends Type
+case class SER() extends Type {
+  override def toString: String = "SER"
+}
 
-case class STRUT() extends Type
+case class STRUT() extends Type {
+  override def toString: String = "STRUT"
+}
 
-case class DSSM() extends Type
+case class DSSM() extends Type {
+  override def toString: String = "DSSM"
+}
 
 object LearnMLlib {
   private val conf = new SparkConf()
@@ -312,7 +318,7 @@ object LearnMLlib {
       .option("inferSchema", value = true)
       .csv("src/main/resources/digits/optdigits_9.csv")
 
-    doExperiment(d6, d6, d6)
+    doExperiment(d6, d9, d9)
   }
 
   def testLandMine():Unit = {
@@ -429,7 +435,7 @@ object LearnMLlib {
       .setStages(Array(transferLabelIndexer, transferAssembler, classifier, labelConverter))
 
     val transferAcc = Utils.trainAndTest(transferPipeline, target, test, berr)
-    println(s"SrcOnly acc:$srcAcc, SER acc:$transferAcc")
+    println(s"SrcOnly acc:$srcAcc, $treeType acc:$transferAcc")
     // Using b error mentioned in paper
     if (!berr) {
       (srcAcc._1, transferAcc._1)
@@ -533,19 +539,42 @@ object LearnMLlib {
   }
 
   def testStrut(): Unit = {
-    val d6 = spark
-      .read
-      .option("header", "true")
-      .option("inferSchema", value = true)
-      .csv("src/main/resources/digits/optdigits_6.csv")
+    def testStrutDigits(): Unit = {
+      val d6 = spark
+        .read
+        .option("header", "true")
+        .option("inferSchema", value = true)
+        .csv("src/main/resources/digits/optdigits_6.csv")
 
-    val d9 = spark
-      .read
-      .option("header", "true")
-      .option("inferSchema", value = true)
-      .csv("src/main/resources/digits/optdigits_9.csv")
+      val d9 = spark
+        .read
+        .option("header", "true")
+        .option("inferSchema", value = true)
+        .csv("src/main/resources/digits/optdigits_9.csv")
 
-    doExperiment(d6, d9, d9, treeType = STRUT(), maxDepth = 5)
+      doExperiment(d6, d9, d9, treeType = STRUT(), maxDepth = 5, numTrees = 1)
+    }
+
+    def testStrutSimple(): Unit = {
+      val a = spark
+        .read
+        .option("header", "true")
+        .option("inferSchema", value = true)
+        .csv("src/main/resources/simple/load.csv")
+        .drop("id")
+
+      val b = spark
+        .read
+        .option("header", "true")
+        .option("inferSchema", value = true)
+        .csv("src/main/resources/simple/load.csv")
+        .drop("id")
+
+      doExperiment(a, b, a, treeType = STRUT(), maxDepth = 5, numTrees = 1)
+    }
+
+    testStrutSimple()
+//    testStrutDigits()
   }
 
   def testMyTree(path: String): Unit = {

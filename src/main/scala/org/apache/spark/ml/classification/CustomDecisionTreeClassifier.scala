@@ -11,8 +11,13 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.Dataset
 
 class CustomDecisionTreeClassifier(val uid: String)
-  extends ProbabilisticClassifier[Vector, CustomDecisionTreeClassifier, DecisionTreeClassificationModel]
-  with RandomForestClassifierParams with DefaultParamsWritable {
+    extends ProbabilisticClassifier[
+      Vector,
+      CustomDecisionTreeClassifier,
+      DecisionTreeClassificationModel
+    ]
+    with RandomForestClassifierParams
+    with DefaultParamsWritable {
   def this() = this(Identifiable.randomUID("decTree"))
 
   var splitFunction: LabeledPoint => Boolean = null
@@ -42,8 +47,8 @@ class CustomDecisionTreeClassifier(val uid: String)
 //      println(vals(9))
 //    })
 
-    val trees = TransferRandomForest.run(src, strategy, getNumTrees, getFeatureSubsetStrategy,
-      getSeed, Some(instr))
+    val trees = TransferRandomForest
+      .run(src, strategy, getNumTrees, getFeatureSubsetStrategy, getSeed, Some(instr))
       .map(_.asInstanceOf[DecisionTreeClassificationModel])
 //    val numFeatures = oldDataset.first().features.size
 //    val m = new RandomForestClassificationModel(uid, trees, numFeatures, numClasses)
@@ -56,15 +61,27 @@ class CustomDecisionTreeClassifier(val uid: String)
     instr.logSuccess(m)
     println("Transfer----------------------------------------------")
 
-    val res = SERTransfer.transfer(m.asInstanceOf[RichDecisionTreeClassificationModel], tgt, strategy, numTrees = 1,
-      featureSubsetStrategy = "all", seed = $(seed), instr = Some(instr), parentUID = Some(uid))
+    val res = SERTransfer.transfer(
+      m.asInstanceOf[RichDecisionTreeClassificationModel],
+      tgt,
+      strategy,
+      numTrees = 1,
+      featureSubsetStrategy = "all",
+      seed = $(seed),
+      instr = Some(instr),
+      parentUID = Some(uid)
+    )
     res
   }
 
-  private[ml] def getOldStrategy(categoricalFeatures: Map[Int, Int],
-                                 numClasses: Int): OldStrategy = {
-    super.getOldStrategy(categoricalFeatures, numClasses, OldAlgo.Classification, getOldImpurity,
-      subsamplingRate = 1.0)
+  private[ml] def getOldStrategy(categoricalFeatures: Map[Int, Int], numClasses: Int): OldStrategy = {
+    super.getOldStrategy(
+      categoricalFeatures,
+      numClasses,
+      OldAlgo.Classification,
+      getOldImpurity,
+      subsamplingRate = 1.0
+    )
   }
 }
 

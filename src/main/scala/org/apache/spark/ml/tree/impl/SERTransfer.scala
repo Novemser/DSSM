@@ -13,14 +13,16 @@ import scala.collection.mutable
 import scala.util.Random
 
 object SERTransfer extends ModelTransfer {
-  def transferModels(trainedModels: Array[RichDecisionTreeClassificationModel],
-                     target: RDD[LabeledPoint],
-                     strategy: Strategy,
-                     numTrees: Int,
-                     featureSubsetStrategy: String,
-                     seed: Long,
-                     instr: Option[Instrumentation[_]],
-                     parentUID: Option[String] = None): Array[RichDecisionTreeClassificationModel] = {
+  def transferModels(
+    trainedModels: Array[RichDecisionTreeClassificationModel],
+    target: RDD[LabeledPoint],
+    strategy: Strategy,
+    numTrees: Int,
+    featureSubsetStrategy: String,
+    seed: Long,
+    instr: Option[Instrumentation[_]],
+    parentUID: Option[String] = None
+  ): Array[RichDecisionTreeClassificationModel] = {
     val timer = new TimeTracker()
 
     timer.start("total")
@@ -44,9 +46,13 @@ object SERTransfer extends ModelTransfer {
     val splits = findSplits(retaggedInput, metadata, seed)
     timer.stop("findSplits")
     logDebug("numBins: feature: number of bins")
-    logDebug(Range(0, metadata.numFeatures).map { featureIndex =>
-      s"\t$featureIndex\t${metadata.numBins(featureIndex)}"
-    }.mkString("\n"))
+    logDebug(
+      Range(0, metadata.numFeatures)
+        .map { featureIndex =>
+          s"\t$featureIndex\t${metadata.numBins(featureIndex)}"
+        }
+        .mkString("\n")
+    )
 
     // Bin feature values (TreePoint representation).
     // Cache input RDD for speedup during multiple passes.
@@ -60,19 +66,24 @@ object SERTransfer extends ModelTransfer {
 
     // depth of the decision tree
     val maxDepth = strategy.maxDepth
-    require(maxDepth <= 30,
-      s"DecisionTree currently only supports maxDepth <= 30, but was given maxDepth = $maxDepth.")
+    require(
+      maxDepth <= 30,
+      s"DecisionTree currently only supports maxDepth <= 30, but was given maxDepth = $maxDepth."
+    )
     // Max memory usage for aggregates
     // TODO: Calculate memory usage more precisely.
     val maxMemoryUsage: Long = strategy.maxMemoryInMB * 1024L * 1024L
     logDebug("max memory usage for aggregates = " + maxMemoryUsage + " bytes.")
 
     val nodeIdCache = if (strategy.useNodeIdCache) {
-      Some(NodeIdCache.init(
-        data = baggedInput,
-        numTrees = numTrees,
-        checkpointInterval = strategy.checkpointInterval,
-        initVal = 1))
+      Some(
+        NodeIdCache.init(
+          data = baggedInput,
+          numTrees = numTrees,
+          checkpointInterval = strategy.checkpointInterval,
+          initVal = 1
+        )
+      )
     } else {
       None
     }
@@ -96,12 +107,14 @@ object SERTransfer extends ModelTransfer {
       // Collect some nodes to split, and choose features for each node (if subsampling).
       // Each group of nodes may come from one or multiple trees, and at multiple levels.
       val (nodesForGroup, treeToNodeToIndexInfo) =
-      RandomForest.selectNodesToSplit(nodeStack, maxMemoryUsage, metadata, rng)
+        RandomForest.selectNodesToSplit(nodeStack, maxMemoryUsage, metadata, rng)
       //      val indexInfo = treeToNodeToIndexInfo.values.flatMap(_.values).mkString(",")
       //      println(s"indexInfo:$indexInfo")
       // Sanity check (should never occur):
-      assert(nodesForGroup.nonEmpty,
-        s"RandomForest selected empty nodesForGroup.  Error for unknown reason.")
+      assert(
+        nodesForGroup.nonEmpty,
+        s"RandomForest selected empty nodesForGroup.  Error for unknown reason."
+      )
 
       // Only send trees to worker if they contain nodes being split this iteration.
       val topNodesForGroup: Map[Int, LearningNode] =
@@ -109,8 +122,17 @@ object SERTransfer extends ModelTransfer {
 
       // Choose node splits, and enqueue new nodes as needed.
       timer.start("findBestSplits")
-      TransferRandomForest.findBestSplits(baggedInput, metadata, topNodesForGroup, nodesForGroup,
-        treeToNodeToIndexInfo, splits, nodeStack, timer, nodeIdCache)
+      TransferRandomForest.findBestSplits(
+        baggedInput,
+        metadata,
+        topNodesForGroup,
+        nodesForGroup,
+        treeToNodeToIndexInfo,
+        splits,
+        nodeStack,
+        timer,
+        nodeIdCache
+      )
       timer.stop("findBestSplits")
     }
 
@@ -147,13 +169,23 @@ object SERTransfer extends ModelTransfer {
     parentUID match {
       case Some(uid) =>
         topNodes.map { rootNode =>
-          new RichDecisionTreeClassificationModel(uid, rootNode.toNode, numFeatures,
-            strategy.getNumClasses, rootNode)
+          new RichDecisionTreeClassificationModel(
+            uid,
+            rootNode.toNode,
+            numFeatures,
+            strategy.getNumClasses,
+            rootNode
+          )
         }
-      case None => topNodes.map { rootNode =>
-        new RichDecisionTreeClassificationModel(rootNode.toNode, numFeatures,
-          strategy.getNumClasses, rootNode)
-      }
+      case None =>
+        topNodes.map { rootNode =>
+          new RichDecisionTreeClassificationModel(
+            rootNode.toNode,
+            numFeatures,
+            strategy.getNumClasses,
+            rootNode
+          )
+        }
     }
   }
 
@@ -191,9 +223,13 @@ object SERTransfer extends ModelTransfer {
     val splits = findSplits(retaggedInput, metadata, seed)
     timer.stop("findSplits")
     logDebug("numBins: feature: number of bins")
-    logDebug(Range(0, metadata.numFeatures).map { featureIndex =>
-      s"\t$featureIndex\t${metadata.numBins(featureIndex)}"
-    }.mkString("\n"))
+    logDebug(
+      Range(0, metadata.numFeatures)
+        .map { featureIndex =>
+          s"\t$featureIndex\t${metadata.numBins(featureIndex)}"
+        }
+        .mkString("\n")
+    )
 
     // Bin feature values (TreePoint representation).
     // Cache input RDD for speedup during multiple passes.
@@ -207,19 +243,24 @@ object SERTransfer extends ModelTransfer {
 
     // depth of the decision tree
     val maxDepth = strategy.maxDepth
-    require(maxDepth <= 30,
-      s"DecisionTree currently only supports maxDepth <= 30, but was given maxDepth = $maxDepth.")
+    require(
+      maxDepth <= 30,
+      s"DecisionTree currently only supports maxDepth <= 30, but was given maxDepth = $maxDepth."
+    )
     // Max memory usage for aggregates
     // TODO: Calculate memory usage more precisely.
     val maxMemoryUsage: Long = strategy.maxMemoryInMB * 1024L * 1024L
     logDebug("max memory usage for aggregates = " + maxMemoryUsage + " bytes.")
 
     val nodeIdCache = if (strategy.useNodeIdCache) {
-      Some(NodeIdCache.init(
-        data = baggedInput,
-        numTrees = numTrees,
-        checkpointInterval = strategy.checkpointInterval,
-        initVal = 1))
+      Some(
+        NodeIdCache.init(
+          data = baggedInput,
+          numTrees = numTrees,
+          checkpointInterval = strategy.checkpointInterval,
+          initVal = 1
+        )
+      )
     } else {
       None
     }
@@ -242,12 +283,14 @@ object SERTransfer extends ModelTransfer {
       // Collect some nodes to split, and choose features for each node (if subsampling).
       // Each group of nodes may come from one or multiple trees, and at multiple levels.
       val (nodesForGroup, treeToNodeToIndexInfo) =
-      RandomForest.selectNodesToSplit(nodeStack, maxMemoryUsage, metadata, rng)
+        RandomForest.selectNodesToSplit(nodeStack, maxMemoryUsage, metadata, rng)
       //      val indexInfo = treeToNodeToIndexInfo.values.flatMap(_.values).mkString(",")
       //      println(s"indexInfo:$indexInfo")
       // Sanity check (should never occur):
-      assert(nodesForGroup.nonEmpty,
-        s"RandomForest selected empty nodesForGroup.  Error for unknown reason.")
+      assert(
+        nodesForGroup.nonEmpty,
+        s"RandomForest selected empty nodesForGroup.  Error for unknown reason."
+      )
 
       // Only send trees to worker if they contain nodes being split this iteration.
       val topNodesForGroup: Map[Int, LearningNode] =
@@ -255,8 +298,17 @@ object SERTransfer extends ModelTransfer {
 
       // Choose node splits, and enqueue new nodes as needed.
       timer.start("findBestSplits")
-      TransferRandomForest.findBestSplits(baggedInput, metadata, topNodesForGroup, nodesForGroup,
-        treeToNodeToIndexInfo, splits, nodeStack, timer, nodeIdCache)
+      TransferRandomForest.findBestSplits(
+        baggedInput,
+        metadata,
+        topNodesForGroup,
+        nodesForGroup,
+        treeToNodeToIndexInfo,
+        splits,
+        nodeStack,
+        timer,
+        nodeIdCache
+      )
       timer.stop("findBestSplits")
     }
 
@@ -291,14 +343,22 @@ object SERTransfer extends ModelTransfer {
 
     parentUID match {
       case Some(uid) =>
-        new RichDecisionTreeClassificationModel(uid, rootNode.toNode, numFeatures,
-          strategy.getNumClasses, rootNode)
+        new RichDecisionTreeClassificationModel(
+          uid,
+          rootNode.toNode,
+          numFeatures,
+          strategy.getNumClasses,
+          rootNode
+        )
       case None =>
-        new RichDecisionTreeClassificationModel(rootNode.toNode, numFeatures,
-          strategy.getNumClasses, rootNode)
+        new RichDecisionTreeClassificationModel(
+          rootNode.toNode,
+          numFeatures,
+          strategy.getNumClasses,
+          rootNode
+        )
     }
   }
-
 
   private def extractLeafNodes(node: TransferLearningNode): Array[TransferLearningNode] = {
     if (node.leftChild.isEmpty && node.rightChild.isEmpty) {

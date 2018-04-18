@@ -6,8 +6,7 @@ import org.apache.spark.mllib.tree.configuration.{Algo => OldAlgo}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.Dataset
 
-class SourceRandomForestClassifier
-  extends RandomForestClassifier {
+class SourceRandomForestClassifier extends RandomForestClassifier {
 
   var model: RichRandomForestClassificationModel = _
 
@@ -17,9 +16,12 @@ class SourceRandomForestClassifier
     val numClasses: Int = getNumClasses(dataset)
 
     if (isDefined(thresholds)) {
-      require($(thresholds).length == numClasses, this.getClass.getSimpleName +
-        ".train() called with non-matching numClasses and thresholds.length." +
-        s" numClasses=$numClasses, but thresholds has length ${$(thresholds).length}")
+      require(
+        $(thresholds).length == numClasses,
+        this.getClass.getSimpleName +
+          ".train() called with non-matching numClasses and thresholds.length." +
+          s" numClasses=$numClasses, but thresholds has length ${$(thresholds).length}"
+      )
     }
 
     val oldDataset: RDD[LabeledPoint] = extractLabeledPoints(dataset, numClasses)
@@ -27,9 +29,26 @@ class SourceRandomForestClassifier
       super.getOldStrategy(categoricalFeatures, numClasses, OldAlgo.Classification, getOldImpurity)
 
     val instr = Instrumentation.create(this, oldDataset)
-    instr.logParams(labelCol, featuresCol, predictionCol, probabilityCol, rawPredictionCol,
-      impurity, numTrees, featureSubsetStrategy, maxDepth, maxBins, maxMemoryInMB, minInfoGain,
-      minInstancesPerNode, seed, subsamplingRate, thresholds, cacheNodeIds, checkpointInterval)
+    instr.logParams(
+      labelCol,
+      featuresCol,
+      predictionCol,
+      probabilityCol,
+      rawPredictionCol,
+      impurity,
+      numTrees,
+      featureSubsetStrategy,
+      maxDepth,
+      maxBins,
+      maxMemoryInMB,
+      minInfoGain,
+      minInstancesPerNode,
+      seed,
+      subsamplingRate,
+      thresholds,
+      cacheNodeIds,
+      checkpointInterval
+    )
 
     val trees = TransferRandomForest
       .run(oldDataset, strategy, getNumTrees, getFeatureSubsetStrategy, getSeed, Some(instr))

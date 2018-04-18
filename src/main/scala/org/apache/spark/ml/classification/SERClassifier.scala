@@ -7,8 +7,7 @@ import org.apache.spark.mllib.tree.configuration.Algo
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.Dataset
 
-class SERClassifier(source: RichRandomForestClassificationModel)
-  extends SingleSourceModelTransfer {
+class SERClassifier(source: RichRandomForestClassificationModel) extends SingleSourceModelTransfer {
 
   setNumTrees(source._trees.length)
 
@@ -19,9 +18,12 @@ class SERClassifier(source: RichRandomForestClassificationModel)
     val numClasses: Int = getNumClasses(dataset)
 
     if (isDefined(thresholds)) {
-      require($(thresholds).length == numClasses, this.getClass.getSimpleName +
-        ".train() called with non-matching numClasses and thresholds.length." +
-        s" numClasses=$numClasses, but thresholds has length ${$(thresholds).length}")
+      require(
+        $(thresholds).length == numClasses,
+        this.getClass.getSimpleName +
+          ".train() called with non-matching numClasses and thresholds.length." +
+          s" numClasses=$numClasses, but thresholds has length ${$(thresholds).length}"
+      )
     }
 
     val oldDataset: RDD[LabeledPoint] = extractLabeledPoints(dataset, numClasses)
@@ -29,17 +31,45 @@ class SERClassifier(source: RichRandomForestClassificationModel)
       super.getOldStrategy(categoricalFeatures, numClasses, Algo.Classification, getOldImpurity)
 
     val instr = Instrumentation.create(this, oldDataset)
-    instr.logParams(labelCol, featuresCol, predictionCol, probabilityCol, rawPredictionCol,
-      impurity, numTrees, featureSubsetStrategy, maxDepth, maxBins, maxMemoryInMB, minInfoGain,
-      minInstancesPerNode, seed, subsamplingRate, thresholds, cacheNodeIds, checkpointInterval)
+    instr.logParams(
+      labelCol,
+      featuresCol,
+      predictionCol,
+      probabilityCol,
+      rawPredictionCol,
+      impurity,
+      numTrees,
+      featureSubsetStrategy,
+      maxDepth,
+      maxBins,
+      maxMemoryInMB,
+      minInfoGain,
+      minInstancesPerNode,
+      seed,
+      subsamplingRate,
+      thresholds,
+      cacheNodeIds,
+      checkpointInterval
+    )
 
     val transferTrees = SERTransfer
-      .transferModels(source._trees.map(_.asInstanceOf[RichDecisionTreeClassificationModel]),
-        oldDataset, strategy, getNumTrees, getFeatureSubsetStrategy, getSeed, Some(instr))
+      .transferModels(
+        source._trees.map(_.asInstanceOf[RichDecisionTreeClassificationModel]),
+        oldDataset,
+        strategy,
+        getNumTrees,
+        getFeatureSubsetStrategy,
+        getSeed,
+        Some(instr)
+      )
 
     val numFeatures = oldDataset.first().features.size
-    val m = new RandomForestClassificationModel(uid, transferTrees.map(_.asInstanceOf[DecisionTreeClassificationModel]),
-      numFeatures, numClasses)
+    val m = new RandomForestClassificationModel(
+      uid,
+      transferTrees.map(_.asInstanceOf[DecisionTreeClassificationModel]),
+      numFeatures,
+      numClasses
+    )
     instr.logSuccess(m)
     m
   }

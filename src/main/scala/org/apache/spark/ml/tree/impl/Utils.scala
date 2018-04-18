@@ -27,11 +27,11 @@ object Utils {
   }
 
   /**
-    * Calculate the error rate of one prediction.
-    *
-    * @param stats   label data array
-    * @param predict prediction
-    */
+   * Calculate the error rate of one prediction.
+   *
+   * @param stats   label data array
+   * @param predict prediction
+   */
   def calcClassificationError(stats: Array[Double], predict: Double): ClassificationError = {
     val predictCount = stats(predict.toInt)
     ClassificationError(predictCount, stats.sum)
@@ -57,7 +57,10 @@ object Utils {
     }
   }
 
-  def trainAndTest(pipeline: Pipeline, trainData: Dataset[Row], testData: Dataset[Row], withBErr: Boolean = false): (Double, Double)= {
+  def trainAndTest(pipeline: Pipeline,
+                   trainData: Dataset[Row],
+                   testData: Dataset[Row],
+                   withBErr: Boolean = false): (Double, Double) = {
     var s = System.currentTimeMillis()
     val model = pipeline.fit(trainData)
     var e = System.currentTimeMillis()

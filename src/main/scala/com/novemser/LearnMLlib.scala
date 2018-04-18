@@ -30,19 +30,24 @@ object LearnMLlib {
   private val conf = new SparkConf()
     .setAppName("Test App")
     .setMaster("local[2]")
-  private val spark = SparkSession.builder()
+  private val spark = SparkSession
+    .builder()
     .config(conf)
     .getOrCreate()
   spark.sparkContext.setLogLevel("WARN")
 
   def simple(): Unit = {
     // Prepare training data from a list of (label, features) tuples.
-    val training = spark.createDataFrame(Seq(
-      (1.0, Vectors.dense(0.0, 1.1, 0.1)),
-      (0.0, Vectors.dense(2.0, 1.0, -1.0)),
-      (0.0, Vectors.dense(2.0, 1.3, 1.0)),
-      (1.0, Vectors.dense(0.0, 1.2, -0.5))
-    )).toDF("label", "features")
+    val training = spark
+      .createDataFrame(
+        Seq(
+          (1.0, Vectors.dense(0.0, 1.1, 0.1)),
+          (0.0, Vectors.dense(2.0, 1.0, -1.0)),
+          (0.0, Vectors.dense(2.0, 1.3, 1.0)),
+          (1.0, Vectors.dense(0.0, 1.2, -0.5))
+        )
+      )
+      .toDF("label", "features")
 
     val lr = new LogisticRegression()
     // Print out the parameters, documentation, and any default values.
@@ -65,14 +70,19 @@ object LearnMLlib {
     val model2 = lr.fit(training, paramMapCombined)
 
     // Prepare test data.
-    val test = spark.createDataFrame(Seq(
-      (1.0, Vectors.dense(-1.0, 1.5, 1.3)),
-      (0.0, Vectors.dense(3.0, 2.0, -0.1)),
-      (1.0, Vectors.dense(0.0, 2.2, -1.5))
-    )).toDF("label", "features")
+    val test = spark
+      .createDataFrame(
+        Seq(
+          (1.0, Vectors.dense(-1.0, 1.5, 1.3)),
+          (0.0, Vectors.dense(3.0, 2.0, -0.1)),
+          (1.0, Vectors.dense(0.0, 2.2, -1.5))
+        )
+      )
+      .toDF("label", "features")
 
     // Using transformer.transform() to make predictions
-    model2.transform(test)
+    model2
+      .transform(test)
       .select("features", "label", "My Prob", "prediction")
       .collect()
       .foreach {
@@ -82,12 +92,16 @@ object LearnMLlib {
   }
 
   def pipeline(): Unit = {
-    val training = spark.createDataFrame(Seq(
-      (0L, "a b c d e spark", 1.0),
-      (1L, "b d", 0.0),
-      (2L, "spark c f g", 1.0),
-      (3L, "hadoop mapreduce", 0.0)
-    )).toDF("id", "text", "label")
+    val training = spark
+      .createDataFrame(
+        Seq(
+          (0L, "a b c d e spark", 1.0),
+          (1L, "b d", 0.0),
+          (2L, "spark c f g", 1.0),
+          (3L, "hadoop mapreduce", 0.0)
+        )
+      )
+      .toDF("id", "text", "label")
 
     // Configure an ML pipeline, which consists of three stages: tokenizer, hashingTF, and lr.
     val tokenizer = new Tokenizer()
@@ -115,14 +129,19 @@ object LearnMLlib {
     )
 
     // Prepare test documents, which are unlabeled (id, text) tuples.
-    val test = spark.createDataFrame(Seq(
-      (4L, "spark i j k"),
-      (5L, "l m n"),
-      (6L, "spark hadoop spark"),
-      (7L, "apache hadoop")
-    )).toDF("id", "text")
+    val test = spark
+      .createDataFrame(
+        Seq(
+          (4L, "spark i j k"),
+          (5L, "l m n"),
+          (6L, "spark hadoop spark"),
+          (7L, "apache hadoop")
+        )
+      )
+      .toDF("id", "text")
 
-    model.transform(test)
+    model
+      .transform(test)
       .select("id", "text", "probability", "prediction")
       .collect()
       .foreach {
@@ -132,8 +151,7 @@ object LearnMLlib {
   }
 
   def testDT(): Unit = {
-    val data = spark
-      .read
+    val data = spark.read
       .format("libsvm")
       .load("/home/novemser/Documents/Code/spark/data/mllib/sample_libsvm_data.txt")
 
@@ -182,7 +200,6 @@ object LearnMLlib {
     val pipeline = new Pipeline()
       .setStages(Array(labelIndexer, featureIndexer, dt, labelConverter))
 
-
     //    val model = pipeline.fit(data)
     //    val test = spark.createDataFrame(Seq(
     //      (4L, "spark i j k"),
@@ -212,14 +229,12 @@ object LearnMLlib {
   }
 
   def testWine(): Unit = {
-    val red = spark
-      .read
+    val red = spark.read
       .option("header", "true")
       .option("inferSchema", value = true)
       .csv("src/main/resources/wine/red.csv")
 
-    val white = spark
-      .read
+    val white = spark.read
       .option("header", "true")
       .option("inferSchema", value = true)
       .csv("src/main/resources/wine/white.csv")
@@ -233,8 +248,7 @@ object LearnMLlib {
   }
 
   def testNumeric(): Unit = {
-    val data = spark
-      .read
+    val data = spark.read
       .option("header", "true")
       .option("inferSchema", value = true)
       .csv("src/main/resources/simple/numeric.csv")
@@ -243,8 +257,7 @@ object LearnMLlib {
   }
 
   def testMushroom(): Unit = {
-    val data = spark
-      .read
+    val data = spark.read
       .option("header", "true")
       .option("inferSchema", value = true)
       .csv("src/main/resources/mushroom/mushroom.csv")
@@ -252,14 +265,18 @@ object LearnMLlib {
     val trainData = data.filter("`stalk-shape` = 'e'") // 3516
     val testData = data.filter("`stalk-shape` = 't'") // 4608
     val indexers = mutable.ArrayBuffer[StringIndexerModel]()
-    data.schema.map(_.name).filter(_ != "id").filter(_ != "class").foreach((name: String) => {
-      val stringIndexer = new StringIndexer()
-        .setInputCol(name)
-        .setHandleInvalid("keep")
-        .setOutputCol(s"indexed_$name")
-        .fit(trainData)
-      indexers += stringIndexer
-    })
+    data.schema
+      .map(_.name)
+      .filter(_ != "id")
+      .filter(_ != "class")
+      .foreach((name: String) => {
+        val stringIndexer = new StringIndexer()
+          .setInputCol(name)
+          .setHandleInvalid("keep")
+          .setOutputCol(s"indexed_$name")
+          .fit(trainData)
+        indexers += stringIndexer
+      })
 
     val trainLabelIndexer = new StringIndexer()
       .setHandleInvalid("skip")
@@ -299,21 +316,21 @@ object LearnMLlib {
       .setLabelCol { trainLabelIndexer.getOutputCol }
 
     val transferPipeline = new Pipeline()
-      .setStages(indexers.toArray ++ Array(transferLabelIndexer, transferAssembler, ser, labelConverter))
+      .setStages(
+        indexers.toArray ++ Array(transferLabelIndexer, transferAssembler, ser, labelConverter)
+      )
 
     val transferAcc = Utils.trainAndTest(transferPipeline, testData, testData)
     println(s"SrcOnly acc:$srcAcc, SER acc:$transferAcc")
   }
 
   def testDigits(): Unit = {
-    val d6 = spark
-      .read
+    val d6 = spark.read
       .option("header", "true")
       .option("inferSchema", value = true)
       .csv("src/main/resources/digits/optdigits_6.csv")
 
-    val d9 = spark
-      .read
+    val d9 = spark.read
       .option("header", "true")
       .option("inferSchema", value = true)
       .csv("src/main/resources/digits/optdigits_9.csv")
@@ -321,13 +338,12 @@ object LearnMLlib {
     doExperiment(d6, d9, d9)
   }
 
-  def testLandMine():Unit = {
+  def testLandMine(): Unit = {
     val mine = mutable.ArrayBuffer[DataFrame]()
     Range(1, 30)
       .map(i => s"src/main/resources/landMine/minefield$i.csv")
       .foreach(path => {
-        val data = spark
-          .read
+        val data = spark.read
           .option("header", "true")
           .option("inferSchema", value = true)
           .csv(path)
@@ -337,19 +353,20 @@ object LearnMLlib {
     val source = mine.take(15).reduce { _ union _ }
     val data = mine.takeRight(14)
 
-    val res = Range(0, 14).map(_ => {
-      val target = data.remove(0)
-      val test = data.reduce { _ union _ }
-      val (srcAcc, serAcc) = doExperiment(source, target, test, berr = true)
-      data += target
-      (srcAcc, serAcc)
-    }).reduce((l, r) => (l._1 + r._1, l._2 + r._2))
+    val res = Range(0, 14)
+      .map(_ => {
+        val target = data.remove(0)
+        val test = data.reduce { _ union _ }
+        val (srcAcc, serAcc) = doExperiment(source, target, test, berr = true)
+        data += target
+        (srcAcc, serAcc)
+      })
+      .reduce((l, r) => (l._1 + r._1, l._2 + r._2))
     println(s"src acc:${res._1 / 14}, ser acc:${res._2 / 14}")
   }
 
   def testLetter(): Unit = {
-    val data = spark
-      .read
+    val data = spark.read
       .option("header", "true")
       .option("inferSchema", true)
       .csv("src/main/resources/letter/letter-recognition.csv")
@@ -359,7 +376,10 @@ object LearnMLlib {
 
     val filterFunc: Row => Boolean = row => {
       val x2bar = row.getInt(7)
-      val mean = x2barmean.filter(keyMean => keyMean.getString(0).equalsIgnoreCase(row.getString(16))).head.getDouble(1)
+      val mean = x2barmean
+        .filter(keyMean => keyMean.getString(0).equalsIgnoreCase(row.getString(16)))
+        .head
+        .getDouble(1)
       x2bar <= mean
     }
 
@@ -380,7 +400,7 @@ object LearnMLlib {
                    berr: Boolean = false,
                    numTrees: Int = 50,
                    treeType: Type = SER(),
-                   maxDepth:Int = 10):(Double, Double) = {
+                   maxDepth: Int = 10): (Double, Double) = {
     printInfo(source, target, test)
 
     val trainLabelIndexer = new StringIndexer()
@@ -421,9 +441,9 @@ object LearnMLlib {
     val srcAcc = Utils.trainAndTest(trainPipeline, source, test, berr)
 
     val classifier = treeType match {
-      case SER() => new SERClassifier(rf.model)
+      case SER()   => new SERClassifier(rf.model)
       case STRUT() => new STRUTClassifier(rf.model)
-      case _ => null
+      case _       => null
     }
 
     classifier
@@ -445,8 +465,7 @@ object LearnMLlib {
   }
 
   def testLoadToDT(path: String): Unit = {
-    val data = spark
-      .read
+    val data = spark.read
       .option("header", "true")
       .csv(path)
 
@@ -462,14 +481,18 @@ object LearnMLlib {
     )
 
     val indexers = mutable.ArrayBuffer[StringIndexerModel]()
-    data.schema.map(_.name).filter(_ != "id").filter(_ != "class").foreach((name: String) => {
-      val stringIndexer = new StringIndexer()
-        .setInputCol(name)
-        .setHandleInvalid("keep")
-        .setOutputCol(s"indexed_$name")
-        .fit(trainData)
-      indexers += stringIndexer
-    })
+    data.schema
+      .map(_.name)
+      .filter(_ != "id")
+      .filter(_ != "class")
+      .foreach((name: String) => {
+        val stringIndexer = new StringIndexer()
+          .setInputCol(name)
+          .setHandleInvalid("keep")
+          .setOutputCol(s"indexed_$name")
+          .fit(trainData)
+        indexers += stringIndexer
+      })
 
     val labelIndexer = new StringIndexer()
       .setHandleInvalid("skip")
@@ -484,8 +507,8 @@ object LearnMLlib {
     val rf =
       new CustomDecisionTreeClassifier()
 //      new RandomForestClassifier()
-      .setFeaturesCol(assembler.getOutputCol)
-      .setLabelCol(labelIndexer.getOutputCol)
+        .setFeaturesCol(assembler.getOutputCol)
+        .setLabelCol(labelIndexer.getOutputCol)
 //      .setMaxBins(100)
 //      .setMaxDepth(9)
     rf.splitFunction = point => {
@@ -540,14 +563,12 @@ object LearnMLlib {
 
   def testStrut(): Unit = {
     def testStrutDigits(): Unit = {
-      val d6 = spark
-        .read
+      val d6 = spark.read
         .option("header", "true")
         .option("inferSchema", value = true)
         .csv("src/main/resources/digits/optdigits_6.csv")
 
-      val d9 = spark
-        .read
+      val d9 = spark.read
         .option("header", "true")
         .option("inferSchema", value = true)
         .csv("src/main/resources/digits/optdigits_9.csv")
@@ -556,15 +577,13 @@ object LearnMLlib {
     }
 
     def testStrutSimple(): Unit = {
-      val a = spark
-        .read
+      val a = spark.read
         .option("header", "true")
         .option("inferSchema", value = true)
         .csv("src/main/resources/simple/load.csv")
         .drop("id")
 
-      val b = spark
-        .read
+      val b = spark.read
         .option("header", "true")
         .option("inferSchema", value = true)
         .csv("src/main/resources/simple/load.csv")
@@ -578,8 +597,7 @@ object LearnMLlib {
   }
 
   def testMyTree(path: String): Unit = {
-    val data = spark
-      .read
+    val data = spark.read
       .option("header", "true")
       .csv(path)
 
@@ -593,14 +611,18 @@ object LearnMLlib {
     )
 
     val indexers = mutable.ArrayBuffer[StringIndexerModel]()
-    data.schema.map(_.name).filter(_ != "id").filter(_ != "class").foreach((name: String) => {
-      val stringIndexer = new StringIndexer()
-        .setInputCol(name)
-        .setHandleInvalid("skip")
-        .setOutputCol(s"indexed_$name")
-        .fit(trainData)
-      indexers += stringIndexer
-    })
+    data.schema
+      .map(_.name)
+      .filter(_ != "id")
+      .filter(_ != "class")
+      .foreach((name: String) => {
+        val stringIndexer = new StringIndexer()
+          .setInputCol(name)
+          .setHandleInvalid("skip")
+          .setOutputCol(s"indexed_$name")
+          .fit(trainData)
+        indexers += stringIndexer
+      })
 
     val labelIndexer = new StringIndexer()
       .setInputCol("class")

@@ -4,8 +4,7 @@ import org.apache.spark.ml.regression.DecisionTreeRegressionModel
 import org.apache.spark.ml.tree.{LearningNode, Node}
 import org.apache.spark.ml.util.Identifiable
 
-class RichDecisionTreeRegressionModel
-(
+class RichDecisionTreeRegressionModel(
   override val uid: String,
   override val rootNode: Node,
   override val numFeatures: Int,

@@ -9,8 +9,8 @@ class TransferLearningNode(id: Int,
                            split: Option[Split],
                            isLeaf: Boolean,
                            stats: ImpurityStats,
-                           var error: ErrorStats
-                          ) extends LearningNode(id, leftChild, rightChild, split, isLeaf, stats) {
+                           var error: ErrorStats)
+    extends LearningNode(id, leftChild, rightChild, split, isLeaf, stats) {
   def predictPath(binnedFeatures: Array[Int], splits: Array[Array[Split]]): Array[Int] = {
     // do this explicit cast
     val learningNode = this.asInstanceOf[LearningNode]
@@ -29,10 +29,12 @@ class TransferLearningNode(id: Int,
         }
       } else {
         if (splitLeft) {
-          Array(this.id) ++ learningNode.leftChild.get.asInstanceOf[TransferLearningNode]
+          Array(this.id) ++ learningNode.leftChild.get
+            .asInstanceOf[TransferLearningNode]
             .predictPath(binnedFeatures, splits)
         } else {
-          Array(this.id) ++ learningNode.rightChild.get.asInstanceOf[TransferLearningNode]
+          Array(this.id) ++ learningNode.rightChild.get
+            .asInstanceOf[TransferLearningNode]
             .predictPath(binnedFeatures, splits)
         }
       }
@@ -41,11 +43,9 @@ class TransferLearningNode(id: Int,
 }
 
 object TransferLearningNode {
+
   /** Create a node with some of its fields set. */
-  def apply(id: Int,
-            isLeaf: Boolean,
-            stats: ImpurityStats,
-            error: ErrorStats): TransferLearningNode = {
+  def apply(id: Int, isLeaf: Boolean, stats: ImpurityStats, error: ErrorStats): TransferLearningNode = {
     new TransferLearningNode(id, None, None, None, false, stats, error)
   }
 

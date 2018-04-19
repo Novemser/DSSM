@@ -156,7 +156,7 @@ object SERTransfer extends ModelTransfer {
         //println(s"LeafErr:$leafError, SubTreeError:$subTreeError")
         if (leafError < subTreeError) {
           // Pruning this node
-          logWarning(s"Pruning node [${expandedLeaf.id}]")
+          logInfo(s"Pruning node [${expandedLeaf.id}]")
           expandedLeaf.leftChild = None
           expandedLeaf.rightChild = None
           expandedLeaf.isLeaf = true
@@ -330,7 +330,7 @@ object SERTransfer extends ModelTransfer {
         println(s"LeafErr:$leafError, SubTreeError:$subTreeError")
         if (leafError < subTreeError) {
           // Pruning this node
-          logWarning(s"Pruning node [${expandedLeaf.id}]")
+          logInfo(s"Pruning node [${expandedLeaf.id}]")
           expandedLeaf.leftChild = None
           expandedLeaf.rightChild = None
           expandedLeaf.isLeaf = true
@@ -380,7 +380,7 @@ object SERTransfer extends ModelTransfer {
       //      println(s"LeafErr:$leafError, SubTreeError:$subTreeError")
       if (leafError < subTreeError) {
         // Pruning this node
-        logWarning(s"Pruning node [${node.id}]")
+        logInfo(s"Pruning node [${node.id}]")
         node.leftChild = None
         node.rightChild = None
       }

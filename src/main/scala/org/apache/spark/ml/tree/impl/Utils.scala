@@ -1,5 +1,6 @@
 package org.apache.spark.ml.tree.impl
 
+import com.novemser.util.Timer
 import org.apache.spark.ml.Pipeline
 import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
 import org.apache.spark.ml.tree._
@@ -60,16 +61,12 @@ object Utils {
   def trainAndTest(pipeline: Pipeline,
                    trainData: Dataset[Row],
                    testData: Dataset[Row],
-                   withBErr: Boolean = false): (Double, Double) = {
-    var s = System.currentTimeMillis()
-    val model = pipeline.fit(trainData)
-    var e = System.currentTimeMillis()
-    println(s"Train time ${e - s}")
+                   withBErr: Boolean = false,
+                   timer: Timer,
+                   timerName: String): (Double, Double) = {
+    val model = timer.time({pipeline.fit(trainData)}, "Train", timerName)
     // Make predictions.
-    s = System.currentTimeMillis()
     val predictions = model.transform(testData)
-    e = System.currentTimeMillis()
-    println(s"Predict time ${e - s}")
     // Select example rows to display.
 //    predictions.select("prediction", "predictedLabel", "label", "class").show(50, truncate = false)
     val bErr = if (withBErr) {
@@ -82,8 +79,8 @@ object Utils {
       .setPredictionCol("prediction")
       .setMetricName("accuracy")
     val accuracy = evaluator.evaluate(predictions)
-    println(s"accuracy: $accuracy, berr: $bErr")
-    (accuracy, bErr)
+//    println(s"accuracy: $accuracy, berr: $bErr")
+    (1 - accuracy, 1 - bErr)
   }
 
   def calcConfMtrx(prediction: DataFrame, numClasses: Int): Array[Array[Int]] = {

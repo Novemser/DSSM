@@ -12,7 +12,7 @@ class SERClassifier(source: RichRandomForestClassificationModel) extends SingleS
   setNumTrees(source._trees.length)
 
   protected override def train(dataset: Dataset[_]): RandomForestClassificationModel = {
-    logWarning(s"Transferring $getNumTrees trees")
+    logInfo(s"Transferring $getNumTrees trees")
     val categoricalFeatures: Map[Int, Int] =
       MetadataUtils.getCategoricalFeatures(dataset.schema($(featuresCol)))
     val numClasses: Int = getNumClasses(dataset)

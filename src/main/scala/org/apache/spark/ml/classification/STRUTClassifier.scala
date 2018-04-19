@@ -11,7 +11,7 @@ class STRUTClassifier(source: RichRandomForestClassificationModel) extends Singl
   setNumTrees(source._trees.length)
 
   override def train(dataset: Dataset[_]): RandomForestClassificationModel = {
-    logWarning(s"Transferring $getNumTrees trees")
+    logInfo(s"Transferring $getNumTrees trees")
     val categoricalFeatures: Map[Int, Int] =
       MetadataUtils.getCategoricalFeatures(dataset.schema($(featuresCol)))
     val numClasses: Int = getNumClasses(dataset)

@@ -1,5 +1,7 @@
 package org.apache.spark.ml.tree.impl
 
+import java.util.Collections
+
 import org.apache.spark.ml.feature.LabeledPoint
 import org.apache.spark.ml.tree._
 import org.apache.spark.ml.tree.impl.RandomForest.NodeIndexInfo
@@ -124,118 +126,56 @@ object STRUTTransfer extends ModelTransfer {
       })
     })
 
+    val nodeByLevel = nodeStack.toList.groupBy { (tuple: (Int, LearningNode)) =>
+      {
+        LearningNode.indexToLevel(tuple._2.id)
+      }
+    }.toList
+
+    val nodesToTrain = nodeByLevel
+      .sortBy { _._1 }
+      .map { _._2 }
+
     timer.stop("init")
-    while (nodeStack.nonEmpty) {
-      // Collect some nodes to split, and choose features for each node (if subsampling).
-      // Each group of nodes may come from one or multiple trees, and at multiple levels.
-      val (nodesForGroup, treeToNodeToIndexInfo) =
-        RandomForest.selectNodesToSplit(nodeStack, maxMemoryUsage, metadata, rng)
-      //      val indexInfo = treeToNodeToIndexInfo.values.flatMap(_.values).mkString(",")
-      //      println(s"indexInfo:$indexInfo")
-      // Sanity check (should never occur):
-      assert(
-        nodesForGroup.nonEmpty,
-        s"RandomForest selected empty nodesForGroup.  Error for unknown reason."
-      )
-
-      // Only send trees to worker if they contain nodes being split this iteration.
-      val topNodesForGroup: Map[Int, LearningNode] =
-        nodesForGroup.keys.map(treeIdx => treeIdx -> topNodes(treeIdx)).toMap
-
-      timer.start("calculateNewSplitsStats")
-      calculateNewSplitsStats(
-        baggedInput,
-        metadata,
-        topNodesForGroup,
-        nodesForGroup,
-        treeToNodeToIndexInfo,
-        splits,
-        nodeStack,
-        timer,
-        nodeIdCache
-      )
-      timer.stop("calculateNewSplitsStats")
-    }
-
-//    println("After transferring")
-    // Extract new stats info
-    topNodes.zipWithIndex.foreach(t => {
-      val statsInfoMap = mutable.Map[TransferLearningNode, ImpurityStats]()
-      extractNodes(t._1, statsInfoMap,  metadata, invalidateStats = false)
-
-      statsInfoMap.foreach((tuple: (TransferLearningNode, ImpurityStats)) => {
-        newNodeStatsInfoMap((t._2, tuple._1.id)) = tuple._2
+    for (nodes <- nodesToTrain) {
+      nodeStack.clear()
+      logInfo(s"Nodes to transfer:${nodes.map(_._2.id).mkString(",")}")
+      nodes.foreach( node => {
+        nodeStack.push(node)
       })
-    })
 
-    // After target data statistics info calculation
-    oldNodeStatsInfoMap.keys
-      .filter {
-        isNodeFeatureContinuousMap.contains // filter all leaf nodes
-      }
-      .filter {
-        isNodeFeatureContinuousMap(_)       // is this node uses continuous feature
-      }
-      .map { (key: (Int, Int)) => // acquire a tuple3 of all information needed
-        (
-          oldNodeStatsInfoMap(key),         // node's old stats info on Src data set
-          newNodeStatsInfoMap(key),         // node's new stats info on Tgt data set
-          key
+      while (nodeStack.nonEmpty) {
+        // Collect some nodes to split, and choose features for each node (if subsampling).
+        // Each group of nodes may come from one or multiple trees, and at multiple levels.
+        val (nodesForGroup, treeToNodeToIndexInfo) =
+        RandomForest.selectNodesToSplit(nodeStack, maxMemoryUsage, metadata, rng)
+        //      val indexInfo = treeToNodeToIndexInfo.values.flatMap(_.values).mkString(",")
+        //      println(s"indexInfo:$indexInfo")
+        // Sanity check (should never occur):
+        assert(
+          nodesForGroup.nonEmpty,
+          s"RandomForest selected empty nodesForGroup.  Error for unknown reason."
         )
-      }
-      .filter { stats => // filter those invalid stats
-        stats._1.leftImpurityCalculator != null &&
-        stats._2.leftImpurityCalculator != null
-      }
-      .filter { stats => // filter those nodes need to switch children
-        {
-          val oldStats = stats._1
-          val newStats = stats._2
 
-          val totalCount = newStats.impurityCalculator.count.toDouble
-          val leftCount = newStats.leftImpurityCalculator.count.toDouble
-          val rightCount = newStats.rightImpurityCalculator.count.toDouble
-          logInfo(s"Total:$totalCount, left:$leftCount, right:$rightCount")
-          val oldLeft = oldStats.leftImpurityCalculator.stats.clone()
-          val oldRight = oldStats.rightImpurityCalculator.stats.clone()
-          val newLeft = newStats.leftImpurityCalculator.stats.clone()
-          val newRight = newStats.rightImpurityCalculator.stats.clone()
-          normalize(oldLeft)
-          normalize(oldRight)
-          normalize(newLeft)
-          normalize(newRight)
+        // Only send trees to worker if they contain nodes being split this iteration.
+        val topNodesForGroup: Map[Int, LearningNode] =
+          nodesForGroup.keys.map(treeIdx => treeIdx -> topNodes(treeIdx)).toMap
 
-          val calculator: (Array[Double], Array[Double]) => Double =
-            smile.math.Math.JensenShannonDivergence
-
-          val jsdLL = calculator(oldLeft, newLeft)
-          val jsdLR = calculator(oldLeft, newRight)
-          val jsdRR = calculator(oldRight, newRight)
-          val jsdRL = calculator(oldRight, newLeft)
-          val divergenceGain =
-            1 - (leftCount / totalCount) * jsdLL - (rightCount / totalCount) * jsdRR
-          val invertedDivergenceGain =
-            1 - (rightCount / totalCount) * jsdLR - (leftCount / totalCount) * jsdRL
-          logInfo(
-            s"jsdLL:$jsdLL, jsdLR:$jsdLR, jsdRR:$jsdRR, jsdRL:$jsdRL; DG1:$divergenceGain, DG2:$invertedDivergenceGain"
-          )
-          // node point to split
-          invertedDivergenceGain > divergenceGain
-        }
+        timer.start("calculateNewSplitsStats")
+        calculateNewSplitsStats(
+          baggedInput,
+          metadata,
+          topNodesForGroup,
+          nodesForGroup,
+          treeToNodeToIndexInfo,
+          splits,
+          nodeStack,
+          timer,
+          nodeIdCache
+        )
+        timer.stop("calculateNewSplitsStats")
       }
-      .map { keys =>  // get nodes to switch
-        nodeMap(keys._3)
-      }
-      .foreach { node => // switch node
-        logInfo(s"Switching child node of node${node.id}")
-        val tmp = node.rightChild
-        node.rightChild = node.leftChild
-        node.leftChild = tmp
-      }
-
-    // Prune unreachable nodes
-//    topNodes foreach { pruneNoDataNode }
-
+    }
     val numFeatures = metadata.numFeatures
 
     parentUID match {
@@ -265,7 +205,7 @@ object STRUTTransfer extends ModelTransfer {
     val left = node.leftChild
     val right = node.rightChild
     if (left.nonEmpty && right.nonEmpty &&
-      node.stats.impurityCalculator.count == 0) {
+        node.stats.impurityCalculator.count == 0) {
       // prune to leaf
       logInfo(s"Pruning node ${node.id} to leaf")
       node.isLeaf = true
@@ -330,7 +270,7 @@ object STRUTTransfer extends ModelTransfer {
           val path = topNodesForGroup(treeIndex)
             .asInstanceOf[TransferLearningNode]
             .predictPath(baggedPoint.datum.binnedFeatures, splits)
-          //        println(s"path for node:${path.mkString(",")}")
+//          logWarning(s"path for node:${path.mkString(",")}")
           // We need to add current point info into all nodes in it's prediction path.
           path.foreach(nodeIndex => {
             val nodeIndexInfo = nodeIndexToInfo.getOrElse(nodeIndex, null)
@@ -421,6 +361,11 @@ object STRUTTransfer extends ModelTransfer {
 
     val nodeNewStatsMap = partitionAggregates
       .reduceByKey((a, b) => a.merge(b))
+        .filter {
+          case (nodeIndex, _) =>
+            val node = nodes(nodeIndex)
+            node.rightChild.nonEmpty // filter leaf nodes
+        }
       .map {
         case (nodeIndex, aggStats) =>
           val featuresForNode = nodeToFeaturesBc.value.flatMap { nodeToFeatures =>
@@ -428,24 +373,52 @@ object STRUTTransfer extends ModelTransfer {
           }
 
           // find best split for each node
-          val (split: Split, stats: ImpurityStats) =
+          val result =
             updateStats(aggStats, splits, featuresForNode, nodes(nodeIndex))
-          (nodeIndex, (split, stats))
+          (nodeIndex, result)
       }
+      .filter { _._2.length > 0 }
       .collectAsMap()
 
     // Update node split info
-    nodeNewStatsMap.foreach((tuple: (Int, (Split, ImpurityStats))) => {
-      val node = nodes(tuple._1)
-      val sp = tuple._2._1
-      val stats = tuple._2._2
-      if (tuple._2._1 != null &&
-        metadata.isContinuous(sp.featureIndex) &&
-        node.split.nonEmpty &&
-        sp.featureIndex == node.split.get.featureIndex &&
-        stats.valid) {
-        node.split = Some(sp)
-        node.stats = stats
+    nodeNewStatsMap.foreach((tuple: (Int, Array[(Split, ImpurityStats, Double, Double)])) => {
+      val node = nodes(tuple._1).asInstanceOf[TransferLearningNode]
+      val newSplits = tuple._2.map(_._1)
+      val newStats = tuple._2.map(_._2)
+      val jsds = tuple._2.map(_._3)
+      val invertedJsds = tuple._2.map(_._4)
+      var splitIndex = 0
+      var best = Math.max(jsds(splitIndex), invertedJsds(splitIndex))
+      Range(1, jsds.length - 1).foreach { i =>
+        {
+          if (newStats(i - 1).gain <= newStats(i).gain
+          && newStats(i + 1).gain <= newStats(i).gain) {
+            if (jsds(i) > best) {
+              best = jsds(i)
+              splitIndex = i
+            }
+            if (invertedJsds(i) > best) {
+              best = invertedJsds(i)
+              splitIndex = i
+            }
+          }
+        }
+      }
+
+      if (Utils.gr(invertedJsds(splitIndex), jsds(splitIndex))) {
+        val tmp = node.leftChild
+        node.leftChild = node.rightChild
+        node.rightChild = tmp
+      }
+      // Was there any useful split?
+      if (splitIndex == 0) {
+//        logWarning(s"node ${node.id} back to leaf")
+        node.isLeaf = true
+        node.leftChild = None
+        node.rightChild = None
+      } else {
+        node.split = Some(newSplits(splitIndex))
+        node.stats = newStats(splitIndex)
       }
     })
   }
@@ -453,18 +426,16 @@ object STRUTTransfer extends ModelTransfer {
   private def updateStats(binAggregates: DTStatsAggregator,
                           splits: Array[Array[Split]],
                           featuresForNode: Option[Array[Int]],
-                          node: LearningNode): (Split, ImpurityStats) = {
+                          node: LearningNode): Array[(Split, ImpurityStats, Double, Double)] = {
 
     // Calculate InformationGain and ImpurityStats if current node is top node
     val level = LearningNode.indexToLevel(node.id)
-    var gainAndImpurityStats: ImpurityStats = if (level == 0) {
-      null
-    } else {
-      node.stats
-    }
+    var gainAndImpurityStats: ImpurityStats = node.stats
+
+    val oldStats = node.stats
 
     val validFeatureSplits =
-      Range(0, binAggregates.metadata.numFeaturesPerNode).view
+      Range(0, binAggregates.metadata.numFeaturesPerNode)
         .map { featureIndexIdx =>
           featuresForNode
             .map(features => (featureIndexIdx, features(featureIndexIdx)))
@@ -473,14 +444,14 @@ object STRUTTransfer extends ModelTransfer {
         .withFilter {
           case (_, featureIndex) =>
             binAggregates.metadata.numSplits(featureIndex) != 0 &&
-            binAggregates.metadata.isContinuous(featureIndex) &&
-            node.split.nonEmpty &&
-            node.split.get.featureIndex == featureIndex
+              binAggregates.metadata.isContinuous(featureIndex) &&
+              node.split.nonEmpty &&
+              node.split.get.featureIndex == featureIndex
         }
 
     // For each (feature, split), calculate the gain, and select the best (feature, split).
     val splitsAndImpurityInfo =
-      validFeatureSplits.map {
+      validFeatureSplits.flatMap {
         case (featureIndexIdx, featureIndex) =>
           val numSplits = binAggregates.metadata.numSplits(featureIndex)
           // Cumulative sum (scanLeft) of bin statistics.
@@ -508,39 +479,50 @@ object STRUTTransfer extends ModelTransfer {
               )
               (splits(featureIndex)(splitIdx), gainAndImpurityStats)
             }
-          .maxBy { _._2.gain }
       }
 
-    val (bestSplit, bestSplitStats) =
-      if (splitsAndImpurityInfo.isEmpty) {
-        // If no valid splits for features, then this split is invalid,
-        // return invalid information gain stats.  Take any split and continue.
-        // Splits is empty, so arbitrarily choose to split on any threshold
-        val dummyFeatureIndex = featuresForNode.map(_.head).getOrElse(0)
-        val parentImpurityCalculator = binAggregates.getParentImpurityCalculator()
-          (
-            new ContinuousSplit(dummyFeatureIndex, 0),
-            ImpurityStats.getInvalidImpurityStats(parentImpurityCalculator)
-          )
-      } else {
-        splitsAndImpurityInfo.maxBy(_._2.gain)
-      }
+    splitsAndImpurityInfo.filter( t => {
+      t._2.leftImpurityCalculator != null &&
+      t._2.rightImpurityCalculator != null
+    }).map(t => {
+      val newStats = t._2
+      val totalCount = newStats.impurityCalculator.count.toDouble
+      val leftCount = newStats.leftImpurityCalculator.count.toDouble
+      val rightCount = newStats.rightImpurityCalculator.count.toDouble
+      logInfo(s"Total:$totalCount, left:$leftCount, right:$rightCount")
+      val oldLeft = oldStats.leftImpurityCalculator.stats.clone()
+      val oldRight = oldStats.rightImpurityCalculator.stats.clone()
+      val newLeft = newStats.leftImpurityCalculator.stats.clone()
+      val newRight = newStats.rightImpurityCalculator.stats.clone()
+      normalize(oldLeft)
+      normalize(oldRight)
+      normalize(newLeft)
+      normalize(newRight)
 
-    (bestSplit, bestSplitStats)
+      val calculator: (Array[Double], Array[Double]) => Double =
+        smile.math.Math.JensenShannonDivergence
+
+      val jsdLL = calculator(oldLeft, newLeft)
+      val jsdLR = calculator(oldLeft, newRight)
+      val jsdRR = calculator(oldRight, newRight)
+      val jsdRL = calculator(oldRight, newLeft)
+      val divergenceGain =
+        1 - (leftCount / totalCount) * jsdLL - (rightCount / totalCount) * jsdRR
+      val invertedDivergenceGain =
+        1 - (rightCount / totalCount) * jsdLR - (leftCount / totalCount) * jsdRL
+      logInfo(
+        s"jsdLL:$jsdLL, jsdLR:$jsdLR, jsdRR:$jsdRR, jsdRL:$jsdRL; DG1:$divergenceGain, DG2:$invertedDivergenceGain"
+      )
+
+      (t._1, t._2, divergenceGain, invertedDivergenceGain)
+    }).toArray
   }
 
   private def extractNodes(node: TransferLearningNode,
                            nodeStatsInfoMap: mutable.Map[TransferLearningNode, ImpurityStats],
-                           metadata: DecisionTreeMetadata,
-                           invalidateStats: Boolean = true): Array[TransferLearningNode] = {
+                           metadata: DecisionTreeMetadata): Array[TransferLearningNode] = {
     nodeStatsInfoMap(node) = node.stats
-    //    println(s"Node:${node.id}, data count:${node.stats.impurityCalculator.count}")
-    if (invalidateStats) {
-      if (node.split.nonEmpty &&
-        metadata.isContinuous(node.split.get.featureIndex)) {
-//        node.stats = null
-      }
-    }
+
     if (node.leftChild.isEmpty && node.rightChild.isEmpty) {
       Array(node)
     } else {
@@ -548,14 +530,12 @@ object STRUTTransfer extends ModelTransfer {
         extractNodes(
           node.leftChild.get.asInstanceOf[TransferLearningNode],
           nodeStatsInfoMap,
-          metadata,
-          invalidateStats
+          metadata
         ) ++
         extractNodes(
           node.rightChild.get.asInstanceOf[TransferLearningNode],
           nodeStatsInfoMap,
-          metadata,
-          invalidateStats
+          metadata
         )
     }
   }

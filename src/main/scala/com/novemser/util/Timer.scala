@@ -16,7 +16,7 @@ class Timer {
 
   def time[R](block: => R, msg: String, name: String): R = {
     val t0 = System.currentTimeMillis()
-    val result = block    // call-by-name
+    val result = block // call-by-name
     val t1 = System.currentTimeMillis()
     timerMap(name) += (t1 - t0)
     countMap(name) += 1

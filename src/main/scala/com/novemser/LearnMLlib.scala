@@ -31,7 +31,7 @@ case class DSSM() extends Type {
 object LearnMLlib {
   private val conf = new SparkConf()
     .setAppName("Test App")
-    .setMaster("local[2]")
+    .setMaster("local[16]")
   private val spark = SparkSession
     .builder()
     .config(conf)
@@ -267,7 +267,6 @@ object LearnMLlib {
     val shapeE = data.filter("`stalk-shape` = 'e'") // 3516
     val shapeT = data.filter("`stalk-shape` = 't'") // 4608
 
-
     val indexers = mutable.ArrayBuffer[StringIndexerModel]()
     data.schema
       .map(_.name)
@@ -311,14 +310,13 @@ object LearnMLlib {
       .setLabels(trainLabelIndexer.labels)
 
     val timer = new Timer()
-        .initTimer("srcTrain")
-        .initTimer("transferTrain")
+      .initTimer("srcTrain")
+      .initTimer("transferTrain")
 
     val pipeline = new Pipeline()
       .setStages(indexers.toArray ++ Array(trainLabelIndexer, trainAssembler, rf, labelConverter))
     // Train model. This also runs the indexers.
-    val srcAcc = Utils.trainAndTest(pipeline, shapeE, shapeT,
-      withBErr = false, timer, "srcTrain")
+    val srcAcc = Utils.trainAndTest(pipeline, shapeE, shapeT, withBErr = false, timer, "srcTrain")
 
     val ser = new SERClassifier(rf.model)
       .setFeaturesCol { trainAssembler.getOutputCol }
@@ -329,8 +327,7 @@ object LearnMLlib {
         indexers.toArray ++ Array(transferLabelIndexer, transferAssembler, ser, labelConverter)
       )
 
-    val transferAcc = Utils.trainAndTest(transferPipeline, shapeT, shapeT,
-      withBErr = false, timer, "transferTrain")
+    val transferAcc = Utils.trainAndTest(transferPipeline, shapeT, shapeT, withBErr = false, timer, "transferTrain")
     println(s"SrcOnly err:$srcAcc, strut err:$transferAcc")
   }
 
@@ -404,9 +401,19 @@ object LearnMLlib {
     val x2barLEMean = data.filter(filterFunc)
 
     doCrossValidateExperiment(x2barLEMean, x2barGMean, expName = "LetterSER-x2bar<=mean-x2bar>mean", treeType = SER())
-    doCrossValidateExperiment(x2barLEMean, x2barGMean, expName = "LetterSTRUT-x2bar<=mean-x2bar>mean", treeType = STRUT())
+    doCrossValidateExperiment(
+      x2barLEMean,
+      x2barGMean,
+      expName = "LetterSTRUT-x2bar<=mean-x2bar>mean",
+      treeType = STRUT()
+    )
     doCrossValidateExperiment(x2barGMean, x2barLEMean, expName = "LetterSER-x2bar>mean-x2bar<=mean", treeType = SER())
-    doCrossValidateExperiment(x2barGMean, x2barLEMean, expName = "LetterSTRUT-x2bar>mean-x2bar<=mean", treeType = STRUT())
+    doCrossValidateExperiment(
+      x2barGMean,
+      x2barLEMean,
+      expName = "LetterSTRUT-x2bar>mean-x2bar<=mean",
+      treeType = STRUT()
+    )
   }
 
   def doCrossValidateExperiment(source: DataFrame,
@@ -477,6 +484,7 @@ object LearnMLlib {
       .setLabelCol { trainLabelIndexer.getOutputCol }
       .setMaxDepth(maxDepth)
       .setNumTrees(numTrees)
+      .setImpurity("entropy")
 
     // Convert indexed labels back to original labels.
     val labelConverter = new IndexToString()
@@ -514,6 +522,33 @@ object LearnMLlib {
   }
 
   def testStrut(): Unit = {
+    def testBug(): Unit = {
+      val data = spark.read
+        .option("header", "true")
+        .option("inferSchema", true)
+        .csv("src/main/resources/letter/letter-recognition.csv")
+
+      val x2barmean = data.groupBy("class").agg("x2bar" -> "mean").collect().sortBy(_.getString(0))
+
+      val filterFunc: Row => Boolean = row => {
+        val x2bar = row.getInt(7)
+        val mean = x2barmean
+          .filter(keyMean => keyMean.getString(0).equalsIgnoreCase(row.getString(16)))
+          .head
+          .getDouble(1)
+        x2bar <= mean
+      }
+
+      val x2barGMean = data.filter(r => !filterFunc(r))
+      val x2barLEMean = data.filter(filterFunc)
+      val timer = new Timer()
+      timer
+        .initTimer("transfer")
+        .initTimer("src")
+      doExperiment(x2barLEMean, x2barGMean, x2barGMean, treeType = STRUT(), maxDepth = 10, numTrees = 50, timer = timer)
+      doExperiment(x2barGMean, x2barLEMean, x2barLEMean, treeType = STRUT(), maxDepth = 10, numTrees = 50, timer = timer)
+    }
+
     def testStrutLetter(): Unit = {
       val data = spark.read
         .option("header", "true")
@@ -534,8 +569,20 @@ object LearnMLlib {
       val x2barGMean = data.filter(r => !filterFunc(r))
       val x2barLEMean = data.filter(filterFunc)
 
-      doCrossValidateExperiment(x2barLEMean, x2barGMean, expName = "LetterSTRUT-x2bar<=mean-x2bar>mean", treeType = STRUT())
-      doCrossValidateExperiment(x2barGMean, x2barLEMean, expName = "LetterSTRUT-x2bar>mean-x2bar<=mean", treeType = STRUT())
+      doCrossValidateExperiment(
+        x2barLEMean,
+        x2barGMean,
+        expName = "LetterSTRUT-x2bar<=mean-x2bar>mean",
+        treeType = STRUT(),
+        numTrees = 1
+      )
+      doCrossValidateExperiment(
+        x2barGMean,
+        x2barLEMean,
+        expName = "LetterSTRUT-x2bar>mean-x2bar<=mean",
+        treeType = STRUT(),
+        numTrees = 1
+      )
     }
 
     def testStrutDigits(): Unit = {
@@ -575,7 +622,8 @@ object LearnMLlib {
 
 //    testStrutSimple()
 //    testStrutDigits()
-    testStrutLetter()
+//    testStrutLetter()
+    testBug()
   }
 
   def printInfo(sourceData: DataFrame, targetData: DataFrame, testData: DataFrame): Unit = {
@@ -588,11 +636,11 @@ object LearnMLlib {
 
   def main(args: Array[String]): Unit = {
 //    testNumeric()
-//    testStrut()
-    testLetter()
-    testWine()
-    testDigits()
-    testLandMine()
+    testStrut()
+//    testLetter()
+//    testWine()
+//    testDigits()
+//    testLandMine()
 //    testMushroom()
     //    pipeline()
     //    testDT()

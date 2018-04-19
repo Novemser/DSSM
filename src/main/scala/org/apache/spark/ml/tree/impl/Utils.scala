@@ -8,6 +8,12 @@ import org.apache.spark.ml.tree.model.ClassificationError
 import org.apache.spark.sql.{DataFrame, Dataset, Row}
 
 object Utils {
+  private val SMALL = 1.0E-6D
+
+  def gr(left: Double, right: Double): Boolean = {
+    (left - right) > SMALL
+  }
+
   def predictImpl(rootNode: LearningNode, binnedFeatures: Array[Int], splits: Array[Array[Split]]): LearningNode = {
     if (rootNode.isLeaf || rootNode.split.isEmpty) {
       rootNode
@@ -64,7 +70,7 @@ object Utils {
                    withBErr: Boolean = false,
                    timer: Timer,
                    timerName: String): (Double, Double) = {
-    val model = timer.time({pipeline.fit(trainData)}, "Train", timerName)
+    val model = timer.time({ pipeline.fit(trainData) }, "Train", timerName)
     // Make predictions.
     val predictions = model.transform(testData)
     // Select example rows to display.

@@ -140,7 +140,7 @@ object STRUTTransfer extends ModelTransfer {
     for (nodes <- nodesToTrain) {
       nodeStack.clear()
       logInfo(s"Nodes to transfer:${nodes.map(_._2.id).mkString(",")}")
-      nodes.foreach( node => {
+      nodes.foreach(node => {
         nodeStack.push(node)
       })
 
@@ -148,7 +148,7 @@ object STRUTTransfer extends ModelTransfer {
         // Collect some nodes to split, and choose features for each node (if subsampling).
         // Each group of nodes may come from one or multiple trees, and at multiple levels.
         val (nodesForGroup, treeToNodeToIndexInfo) =
-        RandomForest.selectNodesToSplit(nodeStack, maxMemoryUsage, metadata, rng)
+          RandomForest.selectNodesToSplit(nodeStack, maxMemoryUsage, metadata, rng)
         //      val indexInfo = treeToNodeToIndexInfo.values.flatMap(_.values).mkString(",")
         //      println(s"indexInfo:$indexInfo")
         // Sanity check (should never occur):
@@ -361,11 +361,11 @@ object STRUTTransfer extends ModelTransfer {
 
     val nodeNewStatsMap = partitionAggregates
       .reduceByKey((a, b) => a.merge(b))
-        .filter {
-          case (nodeIndex, _) =>
-            val node = nodes(nodeIndex)
-            node.rightChild.nonEmpty // filter leaf nodes
-        }
+      .filter {
+        case (nodeIndex, _) =>
+          val node = nodes(nodeIndex)
+          node.rightChild.nonEmpty // filter leaf nodes
+      }
       .map {
         case (nodeIndex, aggStats) =>
           val featuresForNode = nodeToFeaturesBc.value.flatMap { nodeToFeatures =>
@@ -392,7 +392,7 @@ object STRUTTransfer extends ModelTransfer {
       Range(1, jsds.length - 1).foreach { i =>
         {
           if (newStats(i - 1).gain <= newStats(i).gain
-          && newStats(i + 1).gain <= newStats(i).gain) {
+              && newStats(i + 1).gain <= newStats(i).gain) {
             if (jsds(i) > best) {
               best = jsds(i)
               splitIndex = i
@@ -481,41 +481,45 @@ object STRUTTransfer extends ModelTransfer {
             }
       }
 
-    splitsAndImpurityInfo.filter( t => {
-      t._2.leftImpurityCalculator != null &&
-      t._2.rightImpurityCalculator != null
-    }).map(t => {
-      val newStats = t._2
-      val totalCount = newStats.impurityCalculator.count.toDouble
-      val leftCount = newStats.leftImpurityCalculator.count.toDouble
-      val rightCount = newStats.rightImpurityCalculator.count.toDouble
-      logInfo(s"Total:$totalCount, left:$leftCount, right:$rightCount")
-      val oldLeft = oldStats.leftImpurityCalculator.stats.clone()
-      val oldRight = oldStats.rightImpurityCalculator.stats.clone()
-      val newLeft = newStats.leftImpurityCalculator.stats.clone()
-      val newRight = newStats.rightImpurityCalculator.stats.clone()
-      normalize(oldLeft)
-      normalize(oldRight)
-      normalize(newLeft)
-      normalize(newRight)
+    splitsAndImpurityInfo
+      .filter(t => {
+        t._2.leftImpurityCalculator != null &&
+        t._2.rightImpurityCalculator != null &&
+        t._2.leftImpurityCalculator.stats.length == oldStats.leftImpurityCalculator.stats.length
+      })
+      .map(t => {
+        val newStats = t._2
+        val totalCount = newStats.impurityCalculator.count.toDouble
+        val leftCount = newStats.leftImpurityCalculator.count.toDouble
+        val rightCount = newStats.rightImpurityCalculator.count.toDouble
+        logInfo(s"Total:$totalCount, left:$leftCount, right:$rightCount")
+        val oldLeft = oldStats.leftImpurityCalculator.stats.clone()
+        val oldRight = oldStats.rightImpurityCalculator.stats.clone()
+        val newLeft = newStats.leftImpurityCalculator.stats.clone()
+        val newRight = newStats.rightImpurityCalculator.stats.clone()
+        normalize(oldLeft)
+        normalize(oldRight)
+        normalize(newLeft)
+        normalize(newRight)
 
-      val calculator: (Array[Double], Array[Double]) => Double =
-        smile.math.Math.JensenShannonDivergence
+        val calculator: (Array[Double], Array[Double]) => Double =
+          smile.math.Math.JensenShannonDivergence
 
-      val jsdLL = calculator(oldLeft, newLeft)
-      val jsdLR = calculator(oldLeft, newRight)
-      val jsdRR = calculator(oldRight, newRight)
-      val jsdRL = calculator(oldRight, newLeft)
-      val divergenceGain =
-        1 - (leftCount / totalCount) * jsdLL - (rightCount / totalCount) * jsdRR
-      val invertedDivergenceGain =
-        1 - (rightCount / totalCount) * jsdLR - (leftCount / totalCount) * jsdRL
-      logInfo(
-        s"jsdLL:$jsdLL, jsdLR:$jsdLR, jsdRR:$jsdRR, jsdRL:$jsdRL; DG1:$divergenceGain, DG2:$invertedDivergenceGain"
-      )
+        val jsdLL = calculator(oldLeft, newLeft)
+        val jsdLR = calculator(oldLeft, newRight)
+        val jsdRR = calculator(oldRight, newRight)
+        val jsdRL = calculator(oldRight, newLeft)
+        val divergenceGain =
+          1 - (leftCount / totalCount) * jsdLL - (rightCount / totalCount) * jsdRR
+        val invertedDivergenceGain =
+          1 - (rightCount / totalCount) * jsdLR - (leftCount / totalCount) * jsdRL
+        logInfo(
+          s"jsdLL:$jsdLL, jsdLR:$jsdLR, jsdRR:$jsdRR, jsdRL:$jsdRL; DG1:$divergenceGain, DG2:$invertedDivergenceGain"
+        )
 
-      (t._1, t._2, divergenceGain, invertedDivergenceGain)
-    }).toArray
+        (t._1, t._2, divergenceGain, invertedDivergenceGain)
+      })
+      .toArray
   }
 
   private def extractNodes(node: TransferLearningNode,

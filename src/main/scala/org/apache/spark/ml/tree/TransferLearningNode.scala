@@ -3,7 +3,7 @@ package org.apache.spark.ml.tree
 import org.apache.spark.ml.tree.model.ErrorStats
 import org.apache.spark.mllib.tree.model.ImpurityStats
 
-class   TransferLearningNode(id: Int,
+class TransferLearningNode(id: Int,
                            leftChild: Option[TransferLearningNode],
                            rightChild: Option[TransferLearningNode],
                            split: Option[Split],

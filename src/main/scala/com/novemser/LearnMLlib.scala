@@ -33,6 +33,7 @@ object LearnMLlib {
     .setAppName("Transfer learning")
     .set("spark.executor.memory", "7g")
 //    .setMaster("spark://192.168.1.6:7077")
+//    .setMaster("local[8]")
 
   private val spark = SparkSession
     .builder()
@@ -243,8 +244,8 @@ object LearnMLlib {
       .option("inferSchema", value = true)
       .csv("/home/novemser/Documents/Code/DSSM/src/main/resources/wine/white.csv")
 
-    doCrossValidateExperiment(white, red, treeType = SER(), expName = "WineSER-White-Red")
     doCrossValidateExperiment(white, red, treeType = STRUT(), expName = "WineSTRUT-White-Red")
+    doCrossValidateExperiment(white, red, treeType = SER(), expName = "WineSER-White-Red")
     doCrossValidateExperiment(red, white, treeType = SER(), expName = "WineSER-Red-White")
     doCrossValidateExperiment(red, white, treeType = STRUT(), expName = "WineSTRUT-Red-White")
     doCrossValidateExperiment(white, white, treeType = STRUT(), expName = "WineSTRUT-White-Red")
@@ -266,8 +267,43 @@ object LearnMLlib {
       .option("inferSchema", value = true)
       .csv("/home/novemser/Documents/Code/DSSM/src/main/resources/mushroom/mushroom.csv")
 
+    val timerSER = new Timer()
+      .initTimer("srcTrain")
+      .initTimer("transferTrain")
+
+    val timerSTRUT = new Timer()
+      .initTimer("srcTrain")
+      .initTimer("transferTrain")
+
     val shapeE = data.filter("`stalk-shape` = 'e'") // 3516
     val shapeT = data.filter("`stalk-shape` = 't'") // 4608
+    val source = shapeE
+    val target = shapeT
+    println(s"----------------------------------Mushroom shapeE -> shapeT--------------------------------------")
+    val expData = MLUtils.kFold(shapeT.rdd, 20, 1)
+    val count = expData.length
+    val result = expData
+      .map { data =>
+        {
+          val train = spark.createDataFrame(data._1, target.schema)
+          val test = spark.createDataFrame(data._2, target.schema)
+          doExperimentMush(source, train, test, treeType = SER(), timer = timerSER)
+          doExperimentMush(source, train, test, treeType = STRUT(), timer = timerSTRUT)
+        }
+      }
+      .reduce { (l, r) => // average
+        (l._1 + r._1, l._2 + r._2)
+      }
+    println(s"CV src result:${result._1 / count}, transfer result:${result._2 / count}")
+    timerSER.printTime()
+    println(s"--------------------------------------------------------------------------------")
+
+    timerSER
+      .initTimer("srcTrain")
+      .initTimer("transferTrain")
+    timerSTRUT
+      .initTimer("srcTrain")
+      .initTimer("transferTrain")
 
     val indexers = mutable.ArrayBuffer[StringIndexerModel]()
     data.schema
@@ -305,21 +341,17 @@ object LearnMLlib {
     rf.setFeaturesCol { trainAssembler.getOutputCol }
       .setLabelCol { trainLabelIndexer.getOutputCol }
       .setNumTrees(50)
-      .setImpurity("entropy")
+      .setImpurity("gini")
 
     val labelConverter = new IndexToString()
       .setInputCol("prediction")
       .setOutputCol("predictedLabel")
       .setLabels(trainLabelIndexer.labels)
 
-    val timer = new Timer()
-      .initTimer("srcTrain")
-      .initTimer("transferTrain")
-
     val pipeline = new Pipeline()
       .setStages(indexers.toArray ++ Array(trainLabelIndexer, trainAssembler, rf, labelConverter))
     // Train model. This also runs the indexers.
-    val srcAcc = Utils.trainAndTest(pipeline, shapeE, shapeT, withBErr = false, timer, "srcTrain")
+    val srcAcc = Utils.trainAndTest(pipeline, shapeE, shapeT, withBErr = false, timerSER, "srcTrain")
 
     val ser = new SERClassifier(rf.model)
       .setFeaturesCol { trainAssembler.getOutputCol }
@@ -330,7 +362,7 @@ object LearnMLlib {
         indexers.toArray ++ Array(transferLabelIndexer, transferAssembler, ser, labelConverter)
       )
 
-    val transferAcc = Utils.trainAndTest(transferPipeline, shapeT, shapeT, withBErr = false, timer, "transferTrain")
+    val transferAcc = Utils.trainAndTest(transferPipeline, shapeT, shapeT, withBErr = false, timerSER, "transferTrain")
     println(s"Mushroom SER :SrcOnly err:$srcAcc, strut err:$transferAcc")
   }
 
@@ -534,6 +566,84 @@ object LearnMLlib {
     result
   }
 
+  def doExperimentMush(source: DataFrame,
+                       target: DataFrame,
+                       test: DataFrame,
+                       berr: Boolean = false,
+                       numTrees: Int = 50,
+                       treeType: Type = SER(),
+                       maxDepth: Int = 10,
+                       timer: Timer = new Timer): (Double, Double) = {
+    val indexers = mutable.ArrayBuffer[StringIndexerModel]()
+    source.schema
+      .map(_.name)
+      .filter(_ != "id")
+      .filter(_ != "class")
+      .foreach((name: String) => {
+        val stringIndexer = new StringIndexer()
+          .setInputCol(name)
+          .setHandleInvalid("keep")
+          .setOutputCol(s"indexed_$name")
+          .fit(source)
+        indexers += stringIndexer
+      })
+
+    val trainLabelIndexer = new StringIndexer()
+      .setHandleInvalid("skip")
+      .setInputCol("class")
+      .setOutputCol("label")
+      .fit(source)
+
+    val transferLabelIndexer = new StringIndexer()
+      .setHandleInvalid("skip")
+      .setInputCol("class")
+      .setOutputCol("label")
+      .fit(target)
+
+    val trainAssembler = new VectorAssembler()
+      .setInputCols(indexers.map(_.getOutputCol).toArray)
+      .setOutputCol("features")
+
+    val transferAssembler = trainAssembler
+
+    val rf = new SourceRandomForestClassifier()
+    rf.setFeaturesCol { trainAssembler.getOutputCol }
+      .setLabelCol { trainLabelIndexer.getOutputCol }
+      .setNumTrees(50)
+
+    treeType match {
+      case SER()   => rf.setImpurity("gini")
+      case STRUT() => rf.setImpurity("entropy")
+    }
+
+    val labelConverter = new IndexToString()
+      .setInputCol("prediction")
+      .setOutputCol("predictedLabel")
+      .setLabels(trainLabelIndexer.labels)
+
+    val timer = new Timer()
+      .initTimer("srcTrain")
+      .initTimer("transferTrain")
+
+    val pipeline = new Pipeline()
+      .setStages(indexers.toArray ++ Array(trainLabelIndexer, trainAssembler, rf, labelConverter))
+    // Train model. This also runs the indexers.
+    val srcAcc = Utils.trainAndTest(pipeline, source, test, withBErr = false, timer, "srcTrain")
+
+    val ser = new STRUTClassifier(rf.model)
+      .setFeaturesCol { trainAssembler.getOutputCol }
+      .setLabelCol { trainLabelIndexer.getOutputCol }
+
+    val transferPipeline = new Pipeline()
+      .setStages(
+        indexers.toArray ++ Array(transferLabelIndexer, transferAssembler, ser, labelConverter)
+      )
+
+    val transferAcc = Utils.trainAndTest(transferPipeline, target, test, withBErr = false, timer, "transferTrain")
+    println(s"Mushroom :SrcOnly err:$srcAcc, $treeType err:$transferAcc")
+    srcAcc
+  }
+
   def doExperiment(source: DataFrame,
                    target: DataFrame,
                    test: DataFrame,
@@ -541,7 +651,8 @@ object LearnMLlib {
                    numTrees: Int = 50,
                    treeType: Type = SER(),
                    maxDepth: Int = 10,
-                   timer: Timer = new Timer): (Double, Double) = {
+                   timer: Timer = new Timer,
+                   srcOnly: Boolean = false): (Double, Double) = {
 //    printInfo(source, target, test)
 
     val trainLabelIndexer = new StringIndexer()
@@ -569,8 +680,11 @@ object LearnMLlib {
       .setLabelCol { trainLabelIndexer.getOutputCol }
       .setMaxDepth(maxDepth)
       .setNumTrees(numTrees)
-      .setImpurity("entropy")
 
+    treeType match {
+      case SER()   => rf.setImpurity("gini")
+      case STRUT() => rf.setImpurity("entropy")
+    }
     // Convert indexed labels back to original labels.
     val labelConverter = new IndexToString()
       .setInputCol("prediction")
@@ -581,6 +695,10 @@ object LearnMLlib {
       .setStages(Array(trainLabelIndexer, trainAssembler, rf, labelConverter))
 
     val srcAcc = Utils.trainAndTest(trainPipeline, source, test, berr, timer, "src")
+    if (srcOnly) {
+      println(s"Src err:${srcAcc}")
+      return srcAcc
+    }
 
     val classifier = treeType match {
       case SER()   => new SERClassifier(rf.model)
@@ -727,7 +845,7 @@ object LearnMLlib {
     )
   }
 
-  def testHumanActivity(): Unit = {
+  def testHumanActivity(filters: Array[(String, String)]): Unit = {
     val data = spark.read
       .option("header", "true")
       .option("inferSchema", true)
@@ -737,80 +855,36 @@ object LearnMLlib {
       .drop("device")
       .drop("Index")
       .drop("User")
+      .filter("class != 'null'")
       .repartition(44 * 3)
 
-    val target = data.filter("model = 'samsungold'").drop("model")
-    val source = data.filter("model != 'samsungold'").drop("model")
-    println(s"target:${source.count()}, !source:${target.count()}")
-    source.show(5)
-    target.show(5)
+    filters.foreach(filter => {
+      val source = data.filter(filter._1).drop("model")
+      val target = data.filter(filter._2).drop("model")
+      println(s"Source(${filter._1}):${source.count()}, Tgt(${filter._2}):${target.count()}")
+      val Array(l, r) = target.randomSplit(Array(0.8, 0.2), 1)
 
-    val timer = new Timer()
-      .initTimer("src")
-      .initTimer("transfer")
-    doExperiment(source, target, target, timer = timer)
-    //    data.createOrReplaceTempView("accelerometer")
-//    data.persist()
-//    data.printSchema()
-//    data.show(5)
-//    spark.sql("select distinct(model) from accelerometer").show(50)
-//    spark.sql("select count(distinct(user)) from accelerometer").show()
-//    spark.sql("select count(distinct(class)) from accelerometer").show()
-
-//    println(data.count())
-
-//    val Array(trainData, testData) = data.randomSplit(Array(0.8, 0.2))
-
-//    val trainLabelIndexer = new StringIndexer()
-//      .setHandleInvalid("skip")
-//      .setInputCol("class")
-//      .setOutputCol("label")
-//      .setStringOrderType("alphabetAsc")
-//      .fit(trainData)
-//
-//    val transferLabelIndexer = new StringIndexer()
-//      .setHandleInvalid("skip")
-//      .setInputCol("class")
-//      .setOutputCol("label")
-//      .setStringOrderType("alphabetAsc")
-//      .fit(target)
-//
-//    val trainAssembler = new VectorAssembler()
-//      .setInputCols(trainData.schema.map(_.name).filter(s => s != "class").toArray)
-//      .setOutputCol("features")
-//
-//    val transferAssembler = trainAssembler
-//
-//    val rf = new SourceRandomForestClassifier()
-//    rf.setFeaturesCol { trainAssembler.getOutputCol }
-//      .setLabelCol { trainLabelIndexer.getOutputCol }
-//      .setMaxDepth(10)
-//      .setNumTrees(50)
-//      .setImpurity("entropy")
-//
-//    // Convert indexed labels back to original labels.
-//    val labelConverter = new IndexToString()
-//      .setInputCol("prediction")
-//      .setOutputCol("predictedLabel")
-//      .setLabels(trainLabelIndexer.labels)
-//
-//    val trainPipeline = new Pipeline()
-//      .setStages(Array(trainLabelIndexer, trainAssembler, rf, labelConverter))
-//
-//    val ser = new SERClassifier(rf.model)
-//      .setFeaturesCol { trainAssembler.getOutputCol }
-//      .setLabelCol { trainLabelIndexer.getOutputCol }
-//
-//    val transferPipeline = new Pipeline()
-//      .setStages(Array(transferLabelIndexer, transferAssembler, ser, labelConverter))
-//
-//    val timer = new Timer().initTimer("src")
-//    val srcErr = Utils.trainAndTest(trainPipeline, trainData, testData, withBErr = false, timer, "src")
-//    println(s"srcErr:$srcErr")
+      val timer = new Timer()
+        .initTimer("src")
+        .initTimer("transfer")
+      doExperiment(source, l, r, timer = timer)
+      timer.printTime()
+    })
   }
 
   def main(args: Array[String]): Unit = {
-    testHumanActivity()
+    testHumanActivity(
+      Array(
+        ("model = 'samsungold'", "model != 'samsungold'"),
+        ("model = 's3mini'", "model != 's3mini'"),
+        ("model = 'nexus4'", "model != 'nexus4'"),
+        ("model = 's3'", "model != 's3'"),
+        ("class = 'stand'", "class != 'stand'"),
+        ("class = 'stairsdown'", "class = 'stairsup'"),
+        ("class = 'stairsup'", "class = 'stairsdown'"),
+        ("class = 'walk'", "class != 'walk'")
+      )
+    )
 //    testNumeric()
 //    testStrut()
 //    testLetter()

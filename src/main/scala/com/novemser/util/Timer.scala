@@ -32,8 +32,9 @@ class Timer {
     }
   }
 
-  def reset(): Unit = {
+  def reset(): Timer = {
     timerMap.clear()
     countMap.clear()
+    this
   }
 }

@@ -791,7 +791,7 @@ object LearnMLlib {
         x2barGMean,
         expName = "LetterSTRUT-x2bar<=mean-x2bar>mean",
         treeType = STRUT(),
-        numTrees = 50
+        numTrees = 1
       )
       doCrossValidateExperiment(
         x2barGMean,
@@ -839,8 +839,8 @@ object LearnMLlib {
 
 //    testStrutSimple()
 //    testStrutDigits()
-//    testStrutLetter()
-    testBug()
+    testStrutLetter()
+//    testBug()
   }
 
   def printInfo(sourceData: DataFrame, targetData: DataFrame, testData: DataFrame): Unit = {

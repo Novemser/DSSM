@@ -8,6 +8,7 @@ import org.apache.spark.ml.tree.impl.RandomForest.NodeIndexInfo
 import org.apache.spark.ml.tree.impl.TransferRandomForest._
 import org.apache.spark.ml.util.Instrumentation
 import org.apache.spark.mllib.tree.configuration.Strategy
+import org.apache.spark.mllib.tree.impurity.ImpurityCalculator
 import org.apache.spark.mllib.tree.model.ImpurityStats
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.StorageLevel
@@ -509,41 +510,59 @@ object STRUTTransfer extends ModelTransfer {
             }
       }
 
+    def calcJSD(calcUnderTest: ImpurityCalculator,
+                origCalc: ImpurityCalculator,
+                numClasses: Int): Double = {
+      var jsp = 0.0d
+      Range(0, numClasses).foreach { cls =>
+        {
+          val o = calcUnderTest.prob(cls)
+          val e = origCalc.prob(cls)
+          val m = (o + e) / 2
+          if (!Utils.eq(m, 0)) {
+            var logO = Utils.log2(o / m) * o
+            if (java.lang.Double.isNaN(logO)) logO = 0
+            var logE = Utils.log2(e / m) * e
+            if (java.lang.Double.isNaN(logE)) logE = 0
+            jsp += (logO + logE)
+          }
+        }
+      }
+      jsp / 2
+    }
+
+    def calcPartJSD(partLeft: ImpurityCalculator,
+                partRight: ImpurityCalculator,
+                origLeft: ImpurityCalculator,
+                origRight: ImpurityCalculator,
+                numClasses: Int): Double = {
+      val total = 1.0d * partLeft.count + partRight.count
+      calcJSD(partLeft, origLeft, numClasses) * (partLeft.count / total) +
+      calcJSD(partRight, origRight, numClasses) * (partRight.count / total)
+    }
+
     val res = splitsAndImpurityInfo
       .filter(t => {
         t._2.leftImpurityCalculator != null &&
-        t._2.rightImpurityCalculator != null &&
-        t._2.leftImpurityCalculator.stats.length == oldStats.leftImpurityCalculator.stats.length
+        t._2.rightImpurityCalculator != null
       })
       .map(t => {
         val newStats = t._2
-        val totalCount = newStats.impurityCalculator.count.toDouble
-        val leftCount = newStats.leftImpurityCalculator.count.toDouble
-        val rightCount = newStats.rightImpurityCalculator.count.toDouble
-        logInfo(s"Total:$totalCount, left:$leftCount, right:$rightCount")
-        val oldLeft = oldStats.leftImpurityCalculator.stats.clone()
-        val oldRight = oldStats.rightImpurityCalculator.stats.clone()
-        val newLeft = newStats.leftImpurityCalculator.stats.clone()
-        val newRight = newStats.rightImpurityCalculator.stats.clone()
-        normalize(oldLeft)
-        normalize(oldRight)
-        normalize(newLeft)
-        normalize(newRight)
-
-        val calculator: (Array[Double], Array[Double]) => Double =
-          smile.math.Math.JensenShannonDivergence
-
-        val jsdLL = calculator(oldLeft, newLeft)
-        val jsdLR = calculator(oldLeft, newRight)
-        val jsdRR = calculator(oldRight, newRight)
-        val jsdRL = calculator(oldRight, newLeft)
-        val divergenceGain =
-          1 - (leftCount / totalCount) * jsdLL - (rightCount / totalCount) * jsdRR
-        val invertedDivergenceGain =
-          1 - (rightCount / totalCount) * jsdLR - (leftCount / totalCount) * jsdRL
-        logInfo(
-          s"jsdLL:$jsdLL, jsdLR:$jsdLR, jsdRR:$jsdRR, jsdRL:$jsdRL; DG1:$divergenceGain, DG2:$invertedDivergenceGain"
-        )
+        val meta = binAggregates.metadata
+        val numClasses = meta.numClasses
+        val oldLeft = oldStats.leftImpurityCalculator
+        val oldRight = oldStats.rightImpurityCalculator
+        val newLeft = newStats.leftImpurityCalculator
+        val newRight = newStats.rightImpurityCalculator
+        val numBags = 2
+        val jsds = new Array[Double](numBags)
+        jsds(0) = calcPartJSD(newLeft, newRight, oldLeft, oldRight, numClasses)
+        jsds(1) = calcPartJSD(newRight, newLeft, oldLeft, oldRight, numClasses)
+        val divergenceGain = 1 - jsds(0)
+        val invertedDivergenceGain = 1 - jsds(1)
+//        logWarning(
+//          s"DG1:$divergenceGain, DG2:$invertedDivergenceGain"
+//        )
 
         (t._1, t._2, divergenceGain, invertedDivergenceGain)
       })

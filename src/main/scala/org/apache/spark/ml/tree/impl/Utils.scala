@@ -9,10 +9,13 @@ import org.apache.spark.sql.{DataFrame, Dataset, Row}
 
 object Utils {
   private val SMALL = 1.0E-6D
+  val log2: Double = Math.log(2.0D)
 
-  def gr(left: Double, right: Double): Boolean = {
-    (left - right) > SMALL
-  }
+  def gr(a: Double, b: Double): Boolean = (a - b) > SMALL
+
+  def eq(a: Double, b: Double): Boolean = a - b < SMALL && b - a < SMALL
+
+  def log2(a: Double): Double = Math.log(a) / log2
 
   def predictImpl(rootNode: LearningNode, binnedFeatures: Array[Int], splits: Array[Array[Split]]): LearningNode = {
     if (rootNode.isLeaf || rootNode.split.isEmpty) {

@@ -355,6 +355,8 @@ object STRUTTransfer extends ModelTransfer {
         points.foreach(point => {
           binSeqOp(nodeStatsAggregators, point)
         })
+
+//        println(s"NST:${nodeStatsAggregators.mkString(",")}")
         nodeStatsAggregators.zipWithIndex.map(_.swap).iterator
       }
     }
@@ -379,6 +381,19 @@ object STRUTTransfer extends ModelTransfer {
       }
       .filter { _._2.length > 0 }
       .collectAsMap()
+
+//    nodesForGroup.foreach {
+//      case (treeIndex, nodesForTree) =>
+//        nodesForTree.foreach { node =>
+//          val nodeIndex = node.id
+//          val nodeInfo = treeToNodeToIndexInfo(treeIndex)(nodeIndex)
+//          val aggNodeIndex = nodeInfo.nodeIndexInGroup
+//          val newStatsInfoArray = nodeNewStatsMap(aggNodeIndex)
+//          nodeN
+//        }
+//    }
+
+//    println(s"nodeNewStatsMap.size:${nodeNewStatsMap.size}")
 
     // Update node split info
     nodeNewStatsMap.foreach((tuple: (Int, Array[(Split, ImpurityStats, Double, Double)])) => {
@@ -411,18 +426,26 @@ object STRUTTransfer extends ModelTransfer {
         node.rightChild = tmp
       }
       // Was there any useful split?
-      if (splitIndex == 0) {
-//        logWarning(s"node ${node.id} back to leaf")
-        node.isLeaf = true
-        node.leftChild = None
-        node.rightChild = None
-      } else {
-        node.split = Some(newSplits(splitIndex))
-        node.stats = newStats(splitIndex)
-      }
+//      if (newStats.isEmpty) {
+////        logWarning(s"node ${node.id} back to leaf")
+//        node.isLeaf = true
+//        node.leftChild = None
+//        node.rightChild = None
+//      } else {
+      node.split = Some(newSplits(splitIndex))
+      node.stats = newStats(splitIndex)
+//      }
     })
   }
 
+  /**
+    *
+    * @param binAggregates
+    * @param splits
+    * @param featuresForNode
+    * @param node
+    * @return Array of split, stats, divergenceGain, invertedDivergenceGain
+    */
   private def updateStats(binAggregates: DTStatsAggregator,
                           splits: Array[Array[Split]],
                           featuresForNode: Option[Array[Int]],
@@ -430,7 +453,12 @@ object STRUTTransfer extends ModelTransfer {
 
     // Calculate InformationGain and ImpurityStats if current node is top node
     val level = LearningNode.indexToLevel(node.id)
-    var gainAndImpurityStats: ImpurityStats = node.stats
+    var gainAndImpurityStats: ImpurityStats = if (level == 0 &&
+      binAggregates.metadata.isContinuous(node.split.get.featureIndex)) {
+      null
+    } else {
+      node.stats
+    }
 
     val oldStats = node.stats
 
@@ -481,7 +509,7 @@ object STRUTTransfer extends ModelTransfer {
             }
       }
 
-    splitsAndImpurityInfo
+    val res = splitsAndImpurityInfo
       .filter(t => {
         t._2.leftImpurityCalculator != null &&
         t._2.rightImpurityCalculator != null &&
@@ -520,6 +548,15 @@ object STRUTTransfer extends ModelTransfer {
         (t._1, t._2, divergenceGain, invertedDivergenceGain)
       })
       .toArray
+
+    // if there's no data point reaching this node, prune the node.
+    if (res.isEmpty) {
+      logInfo(s"pruning node: ${node.id}")
+      node.isLeaf = true
+      node.leftChild = None
+      node.rightChild = None
+    }
+    res
   }
 
   private def extractNodes(node: TransferLearningNode,

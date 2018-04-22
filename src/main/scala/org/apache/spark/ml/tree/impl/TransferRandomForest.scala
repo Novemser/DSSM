@@ -395,6 +395,7 @@ object TransferRandomForest extends Logging {
         points.foreach(point => {
           binSeqOp(nodeStatsAggregators, point)
         })
+//        println(s"NST:${nodeStatsAggregators.mkString(",")}")
 
         // transform nodeStatsAggregators array to (nodeIndex, nodeAggregateStats) pairs,
         // which can be combined with other partition using `reduceByKey`

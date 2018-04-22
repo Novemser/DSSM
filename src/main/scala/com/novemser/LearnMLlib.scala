@@ -33,7 +33,7 @@ object LearnMLlib {
     .setAppName("Transfer learning")
     .set("spark.executor.memory", "7g")
 //    .setMaster("spark://192.168.1.6:7077")
-//    .setMaster("local[8]")
+    .setMaster("local[*]")
 
   private val spark = SparkSession
     .builder()
@@ -706,6 +706,12 @@ object LearnMLlib {
       case _       => null
     }
 
+    treeType match {
+      case SER()   => classifier.setImpurity("gini")
+      case STRUT() => classifier.setImpurity("entropy")
+    }
+
+
     classifier
       .setFeaturesCol { trainAssembler.getOutputCol }
       .setLabelCol { trainLabelIndexer.getOutputCol }
@@ -785,14 +791,14 @@ object LearnMLlib {
         x2barGMean,
         expName = "LetterSTRUT-x2bar<=mean-x2bar>mean",
         treeType = STRUT(),
-        numTrees = 1
+        numTrees = 50
       )
       doCrossValidateExperiment(
         x2barGMean,
         x2barLEMean,
         expName = "LetterSTRUT-x2bar>mean-x2bar<=mean",
         treeType = STRUT(),
-        numTrees = 1
+        numTrees = 50
       )
     }
 
@@ -807,7 +813,7 @@ object LearnMLlib {
         .option("inferSchema", value = true)
         .csv("src/main/resources/digits/optdigits_9.csv")
 
-      doCrossValidateExperiment(d9, d6, treeType = STRUT(), maxDepth = 10, numTrees = 50)
+      doCrossValidateExperiment(d9, d6, treeType = STRUT(), maxDepth = 10, numTrees = 1)
     }
 
     def testStrutSimple(): Unit = {
@@ -832,9 +838,9 @@ object LearnMLlib {
     }
 
 //    testStrutSimple()
-    testStrutDigits()
+//    testStrutDigits()
 //    testStrutLetter()
-//    testBug()
+    testBug()
   }
 
   def printInfo(sourceData: DataFrame, targetData: DataFrame, testData: DataFrame): Unit = {
@@ -873,20 +879,20 @@ object LearnMLlib {
   }
 
   def main(args: Array[String]): Unit = {
-    testHumanActivity(
-      Array(
-        ("model = 'samsungold'", "model != 'samsungold'"),
-        ("model = 's3mini'", "model != 's3mini'"),
-        ("model = 'nexus4'", "model != 'nexus4'"),
-        ("model = 's3'", "model != 's3'"),
-        ("class = 'stand'", "class != 'stand'"),
-        ("class = 'stairsdown'", "class = 'stairsup'"),
-        ("class = 'stairsup'", "class = 'stairsdown'"),
-        ("class = 'walk'", "class != 'walk'")
-      )
-    )
+//    testHumanActivity(
+//      Array(
+//        ("model = 'samsungold'", "model != 'samsungold'"),
+//        ("model = 's3mini'", "model != 's3mini'"),
+//        ("model = 'nexus4'", "model != 'nexus4'"),
+//        ("model = 's3'", "model != 's3'"),
+//        ("class = 'stand'", "class != 'stand'"),
+//        ("class = 'stairsdown'", "class = 'stairsup'"),
+//        ("class = 'stairsup'", "class = 'stairsdown'"),
+//        ("class = 'walk'", "class != 'walk'")
+//      )
+//    )
 //    testNumeric()
-//    testStrut()
+    testStrut()
 //    testLetter()
 //    testWine()
 //    testDigits()

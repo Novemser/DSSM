@@ -798,7 +798,7 @@ object LearnMLlib {
         x2barLEMean,
         expName = "LetterSTRUT-x2bar>mean-x2bar<=mean",
         treeType = STRUT(),
-        numTrees = 50
+        numTrees = 1
       )
     }
 

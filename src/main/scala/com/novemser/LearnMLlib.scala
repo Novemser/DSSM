@@ -22,8 +22,8 @@ object LearnMLlib {
   private val conf = new SparkConf()
     .setAppName("Transfer learning")
     .set("spark.executor.memory", "7g")
-//    .setMaster("spark://192.168.1.6:7077")
-    .setMaster("local[*]")
+    .setMaster("spark://192.168.1.8:7077")
+//    .setMaster("local[*]")
 
   private val spark = SparkSession
     .builder()
@@ -223,7 +223,7 @@ object LearnMLlib {
 
   }
 
-  def testWine(): Unit = {
+  def testWine(treeType: TreeType.Value): Unit = {
     val red = spark.read
       .option("header", "true")
       .option("inferSchema", value = true)
@@ -234,10 +234,10 @@ object LearnMLlib {
       .option("inferSchema", value = true)
       .csv("/home/novemser/Documents/Code/DSSM/src/main/resources/wine/white.csv")
 
-    doCrossValidateExperiment(white, red, treeType = TreeType.STRUT, expName = "WineSTRUT-White-Red")
+    doCrossValidateExperiment(white, red, treeType = treeType, expName = "WineSTRUT-White-Red")
 //    doCrossValidateExperiment(white, red, treeType = TreeType.SER, expName = "WineSER-White-Red")
 //    doCrossValidateExperiment(red, white, treeType = TreeType.SER, expName = "WineSER-Red-White")
-    doCrossValidateExperiment(red, white, treeType = TreeType.STRUT, expName = "WineSTRUT-Red-White")
+    doCrossValidateExperiment(red, white, treeType = treeType, expName = "WineSTRUT-Red-White")
 //    doCrossValidateExperiment(white, white, treeType = TreeType.STRUT, expName = "WineSTRUT-White-Red")
 //    doCrossValidateExperiment(red, red, treeType = TreeType.SER, expName = "WineSER-Red-White")
   }
@@ -251,7 +251,7 @@ object LearnMLlib {
     doCrossValidateExperiment(data, data, numTrees = 1, treeType = TreeType.STRUT)
   }
 
-  def testMushroom(): Unit = {
+  def testMushroom(treeType: TreeType.Value): Unit = {
     val data = spark.read
       .option("header", "true")
       .option("inferSchema", value = true)
@@ -278,7 +278,7 @@ object LearnMLlib {
           val train = spark.createDataFrame(data._1, target.schema)
           val test = spark.createDataFrame(data._2, target.schema)
 //          doExperimentMush(source, train, test, treeType = TreeType.SER, timer = timerSER)
-          doExperimentMush(source, train, test, treeType = TreeType.STRUT, timer = timerSTRUT)
+          doExperimentMush(source, train, test, treeType = treeType, timer = timerSTRUT)
         }
       }
       .reduce { (l, r) => // average
@@ -437,7 +437,7 @@ object LearnMLlib {
     println(s"Mushroom STRUT:SrcOnly err:$srcAcc, strut err:$transferAcc")
   }
 
-  def testDigits(): Unit = {
+  def testDigits(treeType: TreeType.Value): Unit = {
     val d6 = spark.read
       .option("header", "true")
       .option("inferSchema", value = true)
@@ -449,17 +449,14 @@ object LearnMLlib {
       .csv("/home/novemser/Documents/Code/DSSM/src/main/resources/digits/optdigits_9.csv")
 
 //    doCrossValidateExperiment(d6, d9, treeType = TreeType.SER, expName = "DigitsSER-6-9")
-    doCrossValidateExperiment(d6, d9, treeType = TreeType.STRUT, expName = "DigitsSER-6-9")
+    doCrossValidateExperiment(d6, d9, treeType = treeType, expName = "DigitsSER-6-9")
 //    doCrossValidateExperiment(d9, d6, treeType = TreeType.SER, expName = "DigitsSER-9-6")
-    doCrossValidateExperiment(d9, d6, treeType = TreeType.STRUT, expName = "DigitsSER-9-6")
+    doCrossValidateExperiment(d9, d6, treeType = treeType, expName = "DigitsSER-9-6")
   }
 
-  def testLandMine(): Unit = {
+  def testLandMine(treeType: TreeType.Value): Unit = {
     val mine = mutable.ArrayBuffer[DataFrame]()
-    val timerSER = new Timer()
-      .initTimer("src")
-      .initTimer("transfer")
-    val timerSTRUT = new Timer()
+    val timer = new Timer()
       .initTimer("src")
       .initTimer("transfer")
     Range(1, 30)
@@ -481,22 +478,19 @@ object LearnMLlib {
           val target = data.remove(0)
           val test = data.reduce { _ union _ }
           val (srcAcc, serAcc) =
-            doExperiment(source, target, test, berr = true, treeType = TreeType.SER, timer = timerSER)
-          val (_, strutAcc) =
-            doExperiment(source, target, test, berr = true, treeType = TreeType.STRUT, timer = timerSTRUT)
+            doExperiment(source, target, test, berr = true, treeType = treeType, timer = timer)
           data += target
-          (srcAcc, serAcc, strutAcc)
+          (srcAcc, serAcc)
         }
       }
       .reduce { (l, r) =>
-        (l._1 + r._1, l._2 + r._2, l._3 + r._3)
+        (l._1 + r._1, l._2 + r._2)
       }
-    timerSER.printTime()
-    timerSTRUT.printTime()
-    println(s"src acc:${res._1 / 14}, ser acc:${res._2 / 14}, strut acc:${res._3 / 14}")
+    timer.printTime()
+    println(s"src err:${res._1 / 14}, $treeType err:${res._2 / 14}")
   }
 
-  def testLetter(): Unit = {
+  def testLetter(treeType: TreeType.Value): Unit = {
     val data = spark.read
       .option("header", "true")
       .option("inferSchema", true)
@@ -521,14 +515,14 @@ object LearnMLlib {
       x2barLEMean,
       x2barGMean,
       expName = "LetterSTRUT-x2bar<=mean-x2bar>mean",
-      treeType = TreeType.STRUT
+      treeType = treeType
     )
 //    doCrossValidateExperiment(x2barGMean, x2barLEMean, expName = "LetterSER-x2bar>mean-x2bar<=mean", treeType = TreeType.SER)
     doCrossValidateExperiment(
       x2barGMean,
       x2barLEMean,
       expName = "LetterSTRUT-x2bar>mean-x2bar<=mean",
-      treeType = TreeType.STRUT
+      treeType = treeType
     )
   }
 
@@ -616,6 +610,7 @@ object LearnMLlib {
     treeType match {
       case TreeType.SER   => rf.setImpurity("gini")
       case TreeType.STRUT => rf.setImpurity("entropy")
+      case TreeType.MIX   => rf.setImpurity("entropy")
     }
 
     val labelConverter = new IndexToString()
@@ -635,12 +630,13 @@ object LearnMLlib {
     val classifier = treeType match {
       case TreeType.SER   => new SERClassifier(rf.model)
       case TreeType.STRUT => new STRUTClassifier(rf.model)
-      case _              => null
+      case TreeType.MIX   => new MixClassifier(rf.model)
     }
 
     treeType match {
       case TreeType.SER   => classifier.setImpurity("gini")
       case TreeType.STRUT => classifier.setImpurity("entropy")
+      case TreeType.MIX   => classifier.setImpurity("entropy")
     }
 
     val transferPipeline = new Pipeline()
@@ -912,7 +908,7 @@ object LearnMLlib {
     )
   }
 
-  def testHumanActivity(filters: Array[(String, String)]): Unit = {
+  def testHumanActivity(filters: Array[(String, String)], treeType: TreeType.Value): Unit = {
     val data = spark.read
       .option("header", "true")
       .option("inferSchema", true)
@@ -924,17 +920,22 @@ object LearnMLlib {
       .drop("User")
       .filter("class != 'null'")
       .repartition(44 * 3)
+    import org.apache.spark.sql.functions._
 
     filters.foreach(filter => {
       val source = data.filter(filter._1).drop("model")
+        .withColumn("class", when(col("class") === "stairsdown", "stairs"))
+        .withColumn("class", when(col("class") === "stairsup", "stairs"))
       val target = data.filter(filter._2).drop("model")
+        .withColumn("class", when(col("class") === "stairsdown", "stairs"))
+        .withColumn("class", when(col("class") === "stairsup", "stairs"))
       println(s"Source(${filter._1}):${source.count()}, Tgt(${filter._2}):${target.count()}")
       val Array(l, r) = target.randomSplit(Array(0.8, 0.2), 1)
 
       val timer = new Timer()
         .initTimer("src")
         .initTimer("transfer")
-      doExperiment(source, l, r, timer = timer)
+      doExperiment(source, l, r, timer = timer, treeType = treeType)
       timer.printTime()
     })
   }
@@ -942,24 +943,25 @@ object LearnMLlib {
   def main(args: Array[String]): Unit = {
 //    testHumanActivity(
 //      Array(
-//        ("model = 'samsungold'", "model != 'samsungold'"),
-//        ("model = 's3mini'", "model != 's3mini'"),
-//        ("model = 'nexus4'", "model != 'nexus4'"),
-//        ("model = 's3'", "model != 's3'"),
-//        ("class = 'stand'", "class != 'stand'"),
+////        ("model = 'samsungold'", "model != 'samsungold'"),
+////        ("model = 's3mini'", "model != 's3mini'"),
+////        ("model = 'nexus4'", "model != 'nexus4'"),
+////        ("model = 's3'", "model != 's3'")
+////        ("class = 'stand'", "class != 'stand'"),
 //        ("class = 'stairsdown'", "class = 'stairsup'"),
-//        ("class = 'stairsup'", "class = 'stairsdown'"),
-//        ("class = 'walk'", "class != 'walk'")
-//      )
+//        ("class = 'stairsup'", "class = 'stairsdown'")
+////        ("class = 'walk'", "class != 'walk'")
+//      ),
+//      TreeType.SER
 //    )
-    testMIX()
+//    testMIX()
 //    testNumeric()
 //    testStrut()
-//    testLetter()
-//    testWine()
-//    testDigits()
-//    testLandMine()
-//    testMushroom()
+//    testLetter(TreeType.MIX)
+    testWine(TreeType.MIX)
+//    testDigits(TreeType.MIX)
+//    testLandMine(TreeType.MIX)
+//    testMushroom(TreeType.MIX)
 //    testMushroom2()
     //    pipeline()
     //    testDT()

@@ -54,18 +54,16 @@ class MixClassifier(source: RichRandomForestClassificationModel) extends SingleS
 
     require(getNumTrees > 1, "There must be at least 2 trees for transfer learning in MIX classifier.")
 
-    // Partition into two group
-    var index = 0
-    val (serTrees, strutTrees) = source._trees.partition {
-      _ => index += 1; index / 2 == 0
-    }
+    // Partition randomly into two group
+    val serTrees = source._trees.take((getNumTrees + 1) / 2)
+    val strutTrees = source._trees.takeRight(getNumTrees / 2)
 
     val transferredStrutTrees = STRUTTransfer
       .transferModels(
         strutTrees.map(_.asInstanceOf[RichDecisionTreeClassificationModel]),
         oldDataset,
         strategy,
-        getNumTrees,
+        strutTrees.length,
         "all",
         getSeed,
         Some(instr)
@@ -76,19 +74,20 @@ class MixClassifier(source: RichRandomForestClassificationModel) extends SingleS
         serTrees.map(_.asInstanceOf[RichDecisionTreeClassificationModel]),
         oldDataset,
         strategy,
-        getNumTrees,
-        "all",
+        serTrees.length,
+        getFeatureSubsetStrategy,
         getSeed,
         Some(instr)
       )
 
     val transferTrees = transferredStrutTrees ++ transferredSearTrees
 
+    val numFeatures = oldDataset.first().features.size
     val m = new RandomForestClassificationModel(
       uid,
       transferTrees.map(_.asInstanceOf[DecisionTreeClassificationModel]),
-      source.numFeatures,
-      source.numClasses
+      numFeatures,
+      math.min(source.numClasses, numClasses)
     )
     instr.logSuccess(m)
     m

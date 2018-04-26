@@ -15,7 +15,7 @@ import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import scala.collection.mutable
 
 object TreeType extends Enumeration {
-  val SER, STRUT, DSSM = Value
+  val SER, STRUT, MIX = Value
 }
 
 object LearnMLlib {
@@ -650,7 +650,7 @@ object LearnMLlib {
 
     val transferErr = Utils.trainAndTest(transferPipeline, target, test, withBErr = false, timer, "transferTrain")
     println(s"Mushroom :SrcOnly err:$srcErr, $treeType err:$transferErr")
-    srcErr
+    (srcErr._1, transferErr._1)
   }
 
   def doExperiment(source: DataFrame,
@@ -693,6 +693,7 @@ object LearnMLlib {
     treeType match {
       case TreeType.SER   => rf.setImpurity("gini")
       case TreeType.STRUT => rf.setImpurity("entropy")
+      case TreeType.MIX   => rf.setImpurity("entropy")
     }
     // Convert indexed labels back to original labels.
     val labelConverter = new IndexToString()
@@ -712,12 +713,13 @@ object LearnMLlib {
     val classifier = treeType match {
       case TreeType.SER   => new SERClassifier(rf.model)
       case TreeType.STRUT => new STRUTClassifier(rf.model)
-      case _              => null
+      case TreeType.MIX   => new MixClassifier(rf.model)
     }
 
     treeType match {
       case TreeType.SER   => classifier.setImpurity("gini")
       case TreeType.STRUT => classifier.setImpurity("entropy")
+      case TreeType.MIX   => classifier.setImpurity("entropy")
     }
 
     classifier
@@ -736,6 +738,49 @@ object LearnMLlib {
     } else {
       (srcAcc._2, transferAcc._2)
     }
+  }
+
+  def testMIX(): Unit = {
+    val data = spark.read
+      .option("header", "true")
+      .option("inferSchema", true)
+      .csv("src/main/resources/letter/letter-recognition.csv")
+
+    val x2barmean = data.groupBy("class").agg("x2bar" -> "mean").collect().sortBy(_.getString(0))
+
+    val filterFunc: Row => Boolean = row => {
+      val x2bar = row.getInt(7)
+      val mean = x2barmean
+        .filter(keyMean => keyMean.getString(0).equalsIgnoreCase(row.getString(16)))
+        .head
+        .getDouble(1)
+      x2bar <= mean
+    }
+
+    val x2barGMean = data.filter(r => !filterFunc(r))
+    val x2barLEMean = data.filter(filterFunc)
+    val timer = new Timer()
+    timer
+      .initTimer("transfer")
+      .initTimer("src")
+    doExperiment(
+      x2barLEMean,
+      x2barGMean,
+      x2barGMean,
+      treeType = TreeType.MIX,
+      maxDepth = 10,
+      numTrees = 50,
+      timer = timer
+    )
+    doExperiment(
+      x2barGMean,
+      x2barLEMean,
+      x2barLEMean,
+      treeType = TreeType.MIX,
+      maxDepth = 10,
+      numTrees = 50,
+      timer = timer
+    )
   }
 
   def testStrut(): Unit = {
@@ -907,8 +952,9 @@ object LearnMLlib {
 //        ("class = 'walk'", "class != 'walk'")
 //      )
 //    )
+    testMIX()
 //    testNumeric()
-    testStrut()
+//    testStrut()
 //    testLetter()
 //    testWine()
 //    testDigits()

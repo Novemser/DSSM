@@ -235,11 +235,11 @@ object LearnMLlib {
       .csv("/home/novemser/Documents/Code/DSSM/src/main/resources/wine/white.csv")
 
     doCrossValidateExperiment(white, red, treeType = TreeType.STRUT, expName = "WineSTRUT-White-Red")
-    doCrossValidateExperiment(white, red, treeType = TreeType.SER, expName = "WineSER-White-Red")
-    doCrossValidateExperiment(red, white, treeType = TreeType.SER, expName = "WineSER-Red-White")
+//    doCrossValidateExperiment(white, red, treeType = TreeType.SER, expName = "WineSER-White-Red")
+//    doCrossValidateExperiment(red, white, treeType = TreeType.SER, expName = "WineSER-Red-White")
     doCrossValidateExperiment(red, white, treeType = TreeType.STRUT, expName = "WineSTRUT-Red-White")
-    doCrossValidateExperiment(white, white, treeType = TreeType.STRUT, expName = "WineSTRUT-White-Red")
-    doCrossValidateExperiment(red, red, treeType = TreeType.SER, expName = "WineSER-Red-White")
+//    doCrossValidateExperiment(white, white, treeType = TreeType.STRUT, expName = "WineSTRUT-White-Red")
+//    doCrossValidateExperiment(red, red, treeType = TreeType.SER, expName = "WineSER-Red-White")
   }
 
   def testNumeric(): Unit = {
@@ -277,7 +277,7 @@ object LearnMLlib {
         {
           val train = spark.createDataFrame(data._1, target.schema)
           val test = spark.createDataFrame(data._2, target.schema)
-          doExperimentMush(source, train, test, treeType = TreeType.SER, timer = timerSER)
+//          doExperimentMush(source, train, test, treeType = TreeType.SER, timer = timerSER)
           doExperimentMush(source, train, test, treeType = TreeType.STRUT, timer = timerSTRUT)
         }
       }
@@ -295,65 +295,68 @@ object LearnMLlib {
       .initTimer("srcTrain")
       .initTimer("transferTrain")
 
-    val indexers = mutable.ArrayBuffer[StringIndexerModel]()
-    data.schema
-      .map(_.name)
-      .filter(_ != "id")
-      .filter(_ != "class")
-      .foreach((name: String) => {
-        val stringIndexer = new StringIndexer()
-          .setInputCol(name)
-          .setHandleInvalid("keep")
-          .setOutputCol(s"indexed_$name")
-          .fit(shapeE)
-        indexers += stringIndexer
-      })
-
-    val trainLabelIndexer = new StringIndexer()
-      .setHandleInvalid("skip")
-      .setInputCol("class")
-      .setOutputCol("label")
-      .fit(shapeE)
-
-    val transferLabelIndexer = new StringIndexer()
-      .setHandleInvalid("skip")
-      .setInputCol("class")
-      .setOutputCol("label")
-      .fit(shapeT)
-
-    val trainAssembler = new VectorAssembler()
-      .setInputCols(indexers.map(_.getOutputCol).toArray)
-      .setOutputCol("features")
-
-    val transferAssembler = trainAssembler
-
-    val rf = new SourceRandomForestClassifier()
-    rf.setFeaturesCol { trainAssembler.getOutputCol }
-      .setLabelCol { trainLabelIndexer.getOutputCol }
-      .setNumTrees(50)
-      .setImpurity("gini")
-
-    val labelConverter = new IndexToString()
-      .setInputCol("prediction")
-      .setOutputCol("predictedLabel")
-      .setLabels(trainLabelIndexer.labels)
-
-    val pipeline = new Pipeline()
-      .setStages(indexers.toArray ++ Array(trainLabelIndexer, trainAssembler, rf, labelConverter))
-    // Train model. This also runs the indexers.
-    val srcAcc = Utils.trainAndTest(pipeline, shapeE, shapeT, withBErr = false, timerSER, "srcTrain")
-
-    val ser = new SERClassifier(rf.model)
-      .setFeaturesCol { trainAssembler.getOutputCol }
-      .setLabelCol { trainLabelIndexer.getOutputCol }
-
-    val transferPipeline = new Pipeline()
-      .setStages(
-        indexers.toArray ++ Array(transferLabelIndexer, transferAssembler, ser, labelConverter)
-      )
-
-    val transferAcc = Utils.trainAndTest(transferPipeline, shapeT, shapeT, withBErr = false, timerSER, "transferTrain")
-    println(s"Mushroom SER :SrcOnly err:$srcAcc, strut err:$transferAcc")
+//    val indexers = mutable.ArrayBuffer[StringIndexerModel]()
+//    data.schema
+//      .map(_.name)
+//      .filter(_ != "id")
+//      .filter(_ != "class")
+//      .foreach((name: String) => {
+//        val stringIndexer = new StringIndexer()
+//          .setInputCol(name)
+//          .setHandleInvalid("keep")
+//          .setOutputCol(s"indexed_$name")
+//          .setStringOrderType("alphabetAsc")
+//          .fit(shapeE)
+//        indexers += stringIndexer
+//      })
+//
+//    val trainLabelIndexer = new StringIndexer()
+//      .setHandleInvalid("skip")
+//      .setInputCol("class")
+//      .setStringOrderType("alphabetAsc")
+//      .setOutputCol("label")
+//      .fit(shapeE)
+//
+//    val transferLabelIndexer = new StringIndexer()
+//      .setHandleInvalid("skip")
+//      .setInputCol("class")
+//      .setStringOrderType("alphabetAsc")
+//      .setOutputCol("label")
+//      .fit(shapeT)
+//
+//    val trainAssembler = new VectorAssembler()
+//      .setInputCols(indexers.map(_.getOutputCol).toArray)
+//      .setOutputCol("features")
+//
+//    val transferAssembler = trainAssembler
+//
+//    val rf = new SourceRandomForestClassifier()
+//    rf.setFeaturesCol { trainAssembler.getOutputCol }
+//      .setLabelCol { trainLabelIndexer.getOutputCol }
+//      .setNumTrees(50)
+//      .setImpurity("gini")
+//
+//    val labelConverter = new IndexToString()
+//      .setInputCol("prediction")
+//      .setOutputCol("predictedLabel")
+//      .setLabels(trainLabelIndexer.labels)
+//
+//    val pipeline = new Pipeline()
+//      .setStages(indexers.toArray ++ Array(trainLabelIndexer, trainAssembler, rf, labelConverter))
+//    // Train model. This also runs the indexers.
+//    val srcAcc = Utils.trainAndTest(pipeline, shapeE, shapeT, withBErr = false, timerSER, "srcTrain")
+//
+//    val ser = new SERClassifier(rf.model)
+//      .setFeaturesCol { trainAssembler.getOutputCol }
+//      .setLabelCol { trainLabelIndexer.getOutputCol }
+//
+//    val transferPipeline = new Pipeline()
+//      .setStages(
+//        indexers.toArray ++ Array(transferLabelIndexer, transferAssembler, ser, labelConverter)
+//      )
+//
+//    val transferAcc = Utils.trainAndTest(transferPipeline, shapeT, shapeT, withBErr = false, timerSER, "transferTrain")
+//    println(s"Mushroom SER :SrcOnly err:$srcAcc, strut err:$transferAcc")
   }
 
   def testMushroom2(): Unit = {
@@ -374,6 +377,7 @@ object LearnMLlib {
         val stringIndexer = new StringIndexer()
           .setInputCol(name)
           .setHandleInvalid("keep")
+          .setStringOrderType("alphabetAsc")
           .setOutputCol(s"indexed_$name")
           .fit(shapeE)
         indexers += stringIndexer
@@ -382,12 +386,14 @@ object LearnMLlib {
     val trainLabelIndexer = new StringIndexer()
       .setHandleInvalid("skip")
       .setInputCol("class")
+      .setStringOrderType("alphabetAsc")
       .setOutputCol("label")
       .fit(shapeE)
 
     val transferLabelIndexer = new StringIndexer()
       .setHandleInvalid("skip")
       .setInputCol("class")
+      .setStringOrderType("alphabetAsc")
       .setOutputCol("label")
       .fit(shapeT)
 
@@ -419,7 +425,8 @@ object LearnMLlib {
 
     val ser = new STRUTClassifier(rf.model)
       .setFeaturesCol { trainAssembler.getOutputCol }
-      .setLabelCol { trainLabelIndexer.getOutputCol }
+      .setLabelCol { transferLabelIndexer.getOutputCol }
+      .setImpurity { "entropy" }
 
     val transferPipeline = new Pipeline()
       .setStages(
@@ -441,9 +448,9 @@ object LearnMLlib {
       .option("inferSchema", value = true)
       .csv("/home/novemser/Documents/Code/DSSM/src/main/resources/digits/optdigits_9.csv")
 
-    doCrossValidateExperiment(d6, d9, treeType = TreeType.SER, expName = "DigitsSER-6-9")
+//    doCrossValidateExperiment(d6, d9, treeType = TreeType.SER, expName = "DigitsSER-6-9")
     doCrossValidateExperiment(d6, d9, treeType = TreeType.STRUT, expName = "DigitsSER-6-9")
-    doCrossValidateExperiment(d9, d6, treeType = TreeType.SER, expName = "DigitsSER-9-6")
+//    doCrossValidateExperiment(d9, d6, treeType = TreeType.SER, expName = "DigitsSER-9-6")
     doCrossValidateExperiment(d9, d6, treeType = TreeType.STRUT, expName = "DigitsSER-9-6")
   }
 
@@ -473,8 +480,10 @@ object LearnMLlib {
         {
           val target = data.remove(0)
           val test = data.reduce { _ union _ }
-          val (srcAcc, serAcc) = doExperiment(source, target, test, berr = true, treeType = TreeType.SER, timer = timerSER)
-          val (_, strutAcc) = doExperiment(source, target, test, berr = true, treeType = TreeType.STRUT, timer = timerSTRUT)
+          val (srcAcc, serAcc) =
+            doExperiment(source, target, test, berr = true, treeType = TreeType.SER, timer = timerSER)
+          val (_, strutAcc) =
+            doExperiment(source, target, test, berr = true, treeType = TreeType.STRUT, timer = timerSTRUT)
           data += target
           (srcAcc, serAcc, strutAcc)
         }
@@ -507,14 +516,14 @@ object LearnMLlib {
     val x2barGMean = data.filter(r => !filterFunc(r))
     val x2barLEMean = data.filter(filterFunc)
 
-    doCrossValidateExperiment(x2barLEMean, x2barGMean, expName = "LetterSER-x2bar<=mean-x2bar>mean", treeType = TreeType.SER)
+//    doCrossValidateExperiment(x2barLEMean, x2barGMean, expName = "LetterSER-x2bar<=mean-x2bar>mean", treeType = TreeType.SER)
     doCrossValidateExperiment(
       x2barLEMean,
       x2barGMean,
       expName = "LetterSTRUT-x2bar<=mean-x2bar>mean",
       treeType = TreeType.STRUT
     )
-    doCrossValidateExperiment(x2barGMean, x2barLEMean, expName = "LetterSER-x2bar>mean-x2bar<=mean", treeType = TreeType.SER)
+//    doCrossValidateExperiment(x2barGMean, x2barLEMean, expName = "LetterSER-x2bar>mean-x2bar<=mean", treeType = TreeType.SER)
     doCrossValidateExperiment(
       x2barGMean,
       x2barLEMean,
@@ -573,6 +582,7 @@ object LearnMLlib {
         val stringIndexer = new StringIndexer()
           .setInputCol(name)
           .setHandleInvalid("keep")
+          .setStringOrderType("alphabetAsc")
           .setOutputCol(s"indexed_$name")
           .fit(source)
         indexers += stringIndexer
@@ -582,12 +592,14 @@ object LearnMLlib {
       .setHandleInvalid("skip")
       .setInputCol("class")
       .setOutputCol("label")
+      .setStringOrderType("alphabetAsc")
       .fit(source)
 
     val transferLabelIndexer = new StringIndexer()
       .setHandleInvalid("skip")
       .setInputCol("class")
       .setOutputCol("label")
+      .setStringOrderType("alphabetAsc")
       .fit(target)
 
     val trainAssembler = new VectorAssembler()
@@ -602,7 +614,7 @@ object LearnMLlib {
       .setNumTrees(50)
 
     treeType match {
-      case TreeType.SER => rf.setImpurity("gini")
+      case TreeType.SER   => rf.setImpurity("gini")
       case TreeType.STRUT => rf.setImpurity("entropy")
     }
 
@@ -618,20 +630,27 @@ object LearnMLlib {
     val pipeline = new Pipeline()
       .setStages(indexers.toArray ++ Array(trainLabelIndexer, trainAssembler, rf, labelConverter))
     // Train model. This also runs the indexers.
-    val srcAcc = Utils.trainAndTest(pipeline, source, test, withBErr = false, timer, "srcTrain")
+    val srcErr = Utils.trainAndTest(pipeline, source, test, withBErr = false, timer, "srcTrain")
 
-    val ser = new STRUTClassifier(rf.model)
-      .setFeaturesCol { trainAssembler.getOutputCol }
-      .setLabelCol { trainLabelIndexer.getOutputCol }
+    val classifier = treeType match {
+      case TreeType.SER   => new SERClassifier(rf.model)
+      case TreeType.STRUT => new STRUTClassifier(rf.model)
+      case _              => null
+    }
+
+    treeType match {
+      case TreeType.SER   => classifier.setImpurity("gini")
+      case TreeType.STRUT => classifier.setImpurity("entropy")
+    }
 
     val transferPipeline = new Pipeline()
       .setStages(
-        indexers.toArray ++ Array(transferLabelIndexer, transferAssembler, ser, labelConverter)
+        indexers.toArray ++ Array(transferLabelIndexer, transferAssembler, classifier, labelConverter)
       )
 
-    val transferAcc = Utils.trainAndTest(transferPipeline, target, test, withBErr = false, timer, "transferTrain")
-    println(s"Mushroom :SrcOnly err:$srcAcc, $treeType err:$transferAcc")
-    srcAcc
+    val transferErr = Utils.trainAndTest(transferPipeline, target, test, withBErr = false, timer, "transferTrain")
+    println(s"Mushroom :SrcOnly err:$srcErr, $treeType err:$transferErr")
+    srcErr
   }
 
   def doExperiment(source: DataFrame,
@@ -693,14 +712,13 @@ object LearnMLlib {
     val classifier = treeType match {
       case TreeType.SER   => new SERClassifier(rf.model)
       case TreeType.STRUT => new STRUTClassifier(rf.model)
-      case _       => null
+      case _              => null
     }
 
     treeType match {
-      case TreeType.SER  => classifier.setImpurity("gini")
+      case TreeType.SER   => classifier.setImpurity("gini")
       case TreeType.STRUT => classifier.setImpurity("entropy")
     }
-
 
     classifier
       .setFeaturesCol { trainAssembler.getOutputCol }
@@ -744,7 +762,15 @@ object LearnMLlib {
       timer
         .initTimer("transfer")
         .initTimer("src")
-      doExperiment(x2barLEMean, x2barGMean, x2barGMean, treeType = TreeType.STRUT, maxDepth = 10, numTrees = 50, timer = timer)
+      doExperiment(
+        x2barLEMean,
+        x2barGMean,
+        x2barGMean,
+        treeType = TreeType.STRUT,
+        maxDepth = 10,
+        numTrees = 50,
+        timer = timer
+      )
       doExperiment(
         x2barGMean,
         x2barLEMean,

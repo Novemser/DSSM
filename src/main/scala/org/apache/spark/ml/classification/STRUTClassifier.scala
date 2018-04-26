@@ -62,12 +62,11 @@ class STRUTClassifier(source: RichRandomForestClassificationModel) extends Singl
         Some(instr)
       )
 
-    val numFeatures = oldDataset.first().features.size
     val m = new RandomForestClassificationModel(
       uid,
       transferTrees.map(_.asInstanceOf[DecisionTreeClassificationModel]),
-      numFeatures,
-      numClasses
+      source.numFeatures,
+      source.numClasses
     )
     instr.logSuccess(m)
     m

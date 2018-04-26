@@ -463,7 +463,7 @@ object STRUTTransfer extends ModelTransfer {
     val oldStats = node.stats
 
     val validFeatureSplits =
-      Range(0, binAggregates.metadata.numFeaturesPerNode).view
+      Range(0, binAggregates.metadata.numFeaturesPerNode)
         .map { featureIndexIdx =>
           featuresForNode
             .map(features => (featureIndexIdx, features(featureIndexIdx)))
@@ -477,13 +477,16 @@ object STRUTTransfer extends ModelTransfer {
         }
 
     // update those non continuous features
-    val (continuousSplits, notContinuousSplits) =
-      validFeatureSplits.partition {
-        case (_, featureIndex) => shouldRecalculateStats(featureIndex)
-      }
+    val continuousSplits = validFeatureSplits.withFilter {
+      case (_, featureIndex) => shouldRecalculateStats(featureIndex)
+    }
 
-    val newSplitAndImpurityInfo =
-      notContinuousSplits.map {
+    val nonContinuousSplits = validFeatureSplits.withFilter {
+      case (_, featureIndex) => !shouldRecalculateStats(featureIndex)
+    }
+
+    val nonContinuousSplitAndImpurityInfo =
+      nonContinuousSplits.map {
       case (featureIndexIdx, featureIndex) =>
         val numSplits = binAggregates.metadata.numSplits(featureIndex)
         if (binAggregates.metadata.isUnordered(featureIndex)) {
@@ -594,17 +597,20 @@ object STRUTTransfer extends ModelTransfer {
         }
     }
 
-    if (newSplitAndImpurityInfo.nonEmpty) {
-      val impurityInfo = newSplitAndImpurityInfo.head
+    if (nonContinuousSplitAndImpurityInfo.nonEmpty) {
+      val impurityInfo = nonContinuousSplitAndImpurityInfo.head
       node.split = Some(impurityInfo._1)
       node.stats = impurityInfo._2
-//      if (node.leftChild.nonEmpty) {
-//        node.leftChild.get.stats =
-//      }
+      if (!node.stats.valid) {
+        // Prune this node
+        node.leftChild = None
+        node.rightChild = None
+      }
+      return Array()
     }
 
     // For each (feature, split), calculate the gain, and select the best (feature, split).
-    val splitsAndImpurityInfo =
+    val continuousSplitsAndImpurityInfo =
       continuousSplits.flatMap {
         case (featureIndexIdx, featureIndex) =>
           val numSplits = binAggregates.metadata.numSplits(featureIndex)
@@ -634,6 +640,10 @@ object STRUTTransfer extends ModelTransfer {
               (splits(featureIndex)(splitIdx), gainAndImpurityStats)
             }
       }
+
+//    println(s"binAggregates.metadata.numFeaturesPerNode:${binAggregates.metadata.numFeaturesPerNode}" +
+//      s"continuousSplitsAndImpurityInfo.size:${continuousSplitsAndImpurityInfo.size}," +
+//      s"nonContinuousSplitAndImpurityInfo.size:${nonContinuousSplitAndImpurityInfo.size}")
 
     def calcJSD(calcUnderTest: ImpurityCalculator,
                 origCalc: ImpurityCalculator,
@@ -666,7 +676,7 @@ object STRUTTransfer extends ModelTransfer {
       calcJSD(partRight, origRight, numClasses) * (partRight.count / total)
     }
 
-    val res = splitsAndImpurityInfo
+    val res = continuousSplitsAndImpurityInfo
       .filter(t => {
         t._2.leftImpurityCalculator != null &&
         t._2.rightImpurityCalculator != null
@@ -685,9 +695,9 @@ object STRUTTransfer extends ModelTransfer {
         jsds(1) = calcPartJSD(newRight, newLeft, oldLeft, oldRight, numClasses)
         val divergenceGain = 1 - jsds(0)
         val invertedDivergenceGain = 1 - jsds(1)
-        logWarning(
-          s"DG1:$divergenceGain, DG2:$invertedDivergenceGain"
-        )
+//        logWarning(
+//          s"DG1:$divergenceGain, DG2:$invertedDivergenceGain"
+//        )
 
         (t._1, t._2, divergenceGain, invertedDivergenceGain)
       })
@@ -695,7 +705,9 @@ object STRUTTransfer extends ModelTransfer {
 
     // if there's no data point reaching this node, prune the node.
     if (res.isEmpty) {
-      logWarning(s"pruning node: ${node.id}")
+//      node.stats = continuousSplitsAndImpurityInfo.head._2
+//      node.split = Some(continuousSplitsAndImpurityInfo.head._1)
+//      logWarning(s"pruning node: ${node.id}")
       node.isLeaf = true
       node.leftChild = None
       node.rightChild = None

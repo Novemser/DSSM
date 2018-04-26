@@ -14,18 +14,8 @@ import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 
 import scala.collection.mutable
 
-trait Type
-
-case class SER() extends Type {
-  override def toString: String = "SER"
-}
-
-case class STRUT() extends Type {
-  override def toString: String = "STRUT"
-}
-
-case class DSSM() extends Type {
-  override def toString: String = "DSSM"
+object TreeType extends Enumeration {
+  val SER, STRUT, DSSM = Value
 }
 
 object LearnMLlib {
@@ -244,12 +234,12 @@ object LearnMLlib {
       .option("inferSchema", value = true)
       .csv("/home/novemser/Documents/Code/DSSM/src/main/resources/wine/white.csv")
 
-    doCrossValidateExperiment(white, red, treeType = STRUT(), expName = "WineSTRUT-White-Red")
-    doCrossValidateExperiment(white, red, treeType = SER(), expName = "WineSER-White-Red")
-    doCrossValidateExperiment(red, white, treeType = SER(), expName = "WineSER-Red-White")
-    doCrossValidateExperiment(red, white, treeType = STRUT(), expName = "WineSTRUT-Red-White")
-    doCrossValidateExperiment(white, white, treeType = STRUT(), expName = "WineSTRUT-White-Red")
-    doCrossValidateExperiment(red, red, treeType = SER(), expName = "WineSER-Red-White")
+    doCrossValidateExperiment(white, red, treeType = TreeType.STRUT, expName = "WineSTRUT-White-Red")
+    doCrossValidateExperiment(white, red, treeType = TreeType.SER, expName = "WineSER-White-Red")
+    doCrossValidateExperiment(red, white, treeType = TreeType.SER, expName = "WineSER-Red-White")
+    doCrossValidateExperiment(red, white, treeType = TreeType.STRUT, expName = "WineSTRUT-Red-White")
+    doCrossValidateExperiment(white, white, treeType = TreeType.STRUT, expName = "WineSTRUT-White-Red")
+    doCrossValidateExperiment(red, red, treeType = TreeType.SER, expName = "WineSER-Red-White")
   }
 
   def testNumeric(): Unit = {
@@ -258,7 +248,7 @@ object LearnMLlib {
       .option("inferSchema", value = true)
       .csv("src/main/resources/simple/numeric.csv")
 
-    doCrossValidateExperiment(data, data, numTrees = 1, treeType = STRUT())
+    doCrossValidateExperiment(data, data, numTrees = 1, treeType = TreeType.STRUT)
   }
 
   def testMushroom(): Unit = {
@@ -287,8 +277,8 @@ object LearnMLlib {
         {
           val train = spark.createDataFrame(data._1, target.schema)
           val test = spark.createDataFrame(data._2, target.schema)
-          doExperimentMush(source, train, test, treeType = SER(), timer = timerSER)
-          doExperimentMush(source, train, test, treeType = STRUT(), timer = timerSTRUT)
+          doExperimentMush(source, train, test, treeType = TreeType.SER, timer = timerSER)
+          doExperimentMush(source, train, test, treeType = TreeType.STRUT, timer = timerSTRUT)
         }
       }
       .reduce { (l, r) => // average
@@ -451,10 +441,10 @@ object LearnMLlib {
       .option("inferSchema", value = true)
       .csv("/home/novemser/Documents/Code/DSSM/src/main/resources/digits/optdigits_9.csv")
 
-    doCrossValidateExperiment(d6, d9, treeType = SER(), expName = "DigitsSER-6-9")
-    doCrossValidateExperiment(d6, d9, treeType = STRUT(), expName = "DigitsSER-6-9")
-    doCrossValidateExperiment(d9, d6, treeType = SER(), expName = "DigitsSER-9-6")
-    doCrossValidateExperiment(d9, d6, treeType = STRUT(), expName = "DigitsSER-9-6")
+    doCrossValidateExperiment(d6, d9, treeType = TreeType.SER, expName = "DigitsSER-6-9")
+    doCrossValidateExperiment(d6, d9, treeType = TreeType.STRUT, expName = "DigitsSER-6-9")
+    doCrossValidateExperiment(d9, d6, treeType = TreeType.SER, expName = "DigitsSER-9-6")
+    doCrossValidateExperiment(d9, d6, treeType = TreeType.STRUT, expName = "DigitsSER-9-6")
   }
 
   def testLandMine(): Unit = {
@@ -483,8 +473,8 @@ object LearnMLlib {
         {
           val target = data.remove(0)
           val test = data.reduce { _ union _ }
-          val (srcAcc, serAcc) = doExperiment(source, target, test, berr = true, treeType = SER(), timer = timerSER)
-          val (_, strutAcc) = doExperiment(source, target, test, berr = true, treeType = STRUT(), timer = timerSTRUT)
+          val (srcAcc, serAcc) = doExperiment(source, target, test, berr = true, treeType = TreeType.SER, timer = timerSER)
+          val (_, strutAcc) = doExperiment(source, target, test, berr = true, treeType = TreeType.STRUT, timer = timerSTRUT)
           data += target
           (srcAcc, serAcc, strutAcc)
         }
@@ -517,19 +507,19 @@ object LearnMLlib {
     val x2barGMean = data.filter(r => !filterFunc(r))
     val x2barLEMean = data.filter(filterFunc)
 
-    doCrossValidateExperiment(x2barLEMean, x2barGMean, expName = "LetterSER-x2bar<=mean-x2bar>mean", treeType = SER())
+    doCrossValidateExperiment(x2barLEMean, x2barGMean, expName = "LetterSER-x2bar<=mean-x2bar>mean", treeType = TreeType.SER)
     doCrossValidateExperiment(
       x2barLEMean,
       x2barGMean,
       expName = "LetterSTRUT-x2bar<=mean-x2bar>mean",
-      treeType = STRUT()
+      treeType = TreeType.STRUT
     )
-    doCrossValidateExperiment(x2barGMean, x2barLEMean, expName = "LetterSER-x2bar>mean-x2bar<=mean", treeType = SER())
+    doCrossValidateExperiment(x2barGMean, x2barLEMean, expName = "LetterSER-x2bar>mean-x2bar<=mean", treeType = TreeType.SER)
     doCrossValidateExperiment(
       x2barGMean,
       x2barLEMean,
       expName = "LetterSTRUT-x2bar>mean-x2bar<=mean",
-      treeType = STRUT()
+      treeType = TreeType.STRUT
     )
   }
 
@@ -537,7 +527,7 @@ object LearnMLlib {
                                 target: DataFrame,
                                 berr: Boolean = false,
                                 numTrees: Int = 50,
-                                treeType: Type = SER(),
+                                treeType: TreeType.Value = TreeType.SER,
                                 maxDepth: Int = 10,
                                 expName: String = "",
                                 doTransfer: Boolean = false): (Double, Double) = {
@@ -571,7 +561,7 @@ object LearnMLlib {
                        test: DataFrame,
                        berr: Boolean = false,
                        numTrees: Int = 50,
-                       treeType: Type = SER(),
+                       treeType: TreeType.Value = TreeType.SER,
                        maxDepth: Int = 10,
                        timer: Timer = new Timer): (Double, Double) = {
     val indexers = mutable.ArrayBuffer[StringIndexerModel]()
@@ -612,8 +602,8 @@ object LearnMLlib {
       .setNumTrees(50)
 
     treeType match {
-      case SER()   => rf.setImpurity("gini")
-      case STRUT() => rf.setImpurity("entropy")
+      case TreeType.SER => rf.setImpurity("gini")
+      case TreeType.STRUT => rf.setImpurity("entropy")
     }
 
     val labelConverter = new IndexToString()
@@ -649,7 +639,7 @@ object LearnMLlib {
                    test: DataFrame,
                    berr: Boolean = false,
                    numTrees: Int = 50,
-                   treeType: Type = SER(),
+                   treeType: TreeType.Value = TreeType.SER,
                    maxDepth: Int = 10,
                    timer: Timer = new Timer,
                    srcOnly: Boolean = false): (Double, Double) = {
@@ -682,8 +672,8 @@ object LearnMLlib {
       .setNumTrees(numTrees)
 
     treeType match {
-      case SER()   => rf.setImpurity("gini")
-      case STRUT() => rf.setImpurity("entropy")
+      case TreeType.SER   => rf.setImpurity("gini")
+      case TreeType.STRUT => rf.setImpurity("entropy")
     }
     // Convert indexed labels back to original labels.
     val labelConverter = new IndexToString()
@@ -701,14 +691,14 @@ object LearnMLlib {
     }
 
     val classifier = treeType match {
-      case SER()   => new SERClassifier(rf.model)
-      case STRUT() => new STRUTClassifier(rf.model)
+      case TreeType.SER   => new SERClassifier(rf.model)
+      case TreeType.STRUT => new STRUTClassifier(rf.model)
       case _       => null
     }
 
     treeType match {
-      case SER()   => classifier.setImpurity("gini")
-      case STRUT() => classifier.setImpurity("entropy")
+      case TreeType.SER  => classifier.setImpurity("gini")
+      case TreeType.STRUT => classifier.setImpurity("entropy")
     }
 
 
@@ -754,12 +744,12 @@ object LearnMLlib {
       timer
         .initTimer("transfer")
         .initTimer("src")
-      doExperiment(x2barLEMean, x2barGMean, x2barGMean, treeType = STRUT(), maxDepth = 10, numTrees = 50, timer = timer)
+      doExperiment(x2barLEMean, x2barGMean, x2barGMean, treeType = TreeType.STRUT, maxDepth = 10, numTrees = 50, timer = timer)
       doExperiment(
         x2barGMean,
         x2barLEMean,
         x2barLEMean,
-        treeType = STRUT(),
+        treeType = TreeType.STRUT,
         maxDepth = 10,
         numTrees = 50,
         timer = timer
@@ -790,15 +780,15 @@ object LearnMLlib {
         x2barLEMean,
         x2barGMean,
         expName = "LetterSTRUT-x2bar<=mean-x2bar>mean",
-        treeType = STRUT(),
-        numTrees = 1
+        treeType = TreeType.STRUT,
+        numTrees = 50
       )
       doCrossValidateExperiment(
         x2barGMean,
         x2barLEMean,
         expName = "LetterSTRUT-x2bar>mean-x2bar<=mean",
-        treeType = STRUT(),
-        numTrees = 1
+        treeType = TreeType.STRUT,
+        numTrees = 50
       )
     }
 
@@ -813,7 +803,7 @@ object LearnMLlib {
         .option("inferSchema", value = true)
         .csv("src/main/resources/digits/optdigits_9.csv")
 
-      doCrossValidateExperiment(d9, d6, treeType = STRUT(), maxDepth = 10, numTrees = 1)
+      doCrossValidateExperiment(d9, d6, treeType = TreeType.STRUT, maxDepth = 10, numTrees = 1)
     }
 
     def testStrutSimple(): Unit = {
@@ -834,7 +824,7 @@ object LearnMLlib {
       timer
         .initTimer("transfer")
         .initTimer("src")
-      doExperiment(a, b, a, treeType = STRUT(), maxDepth = 5, numTrees = 1, timer = timer)
+      doExperiment(a, b, a, treeType = TreeType.STRUT, maxDepth = 5, numTrees = 1, timer = timer)
     }
 
 //    testStrutSimple()

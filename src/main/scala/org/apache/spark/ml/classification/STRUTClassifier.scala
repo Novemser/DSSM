@@ -57,7 +57,7 @@ class STRUTClassifier(source: RichRandomForestClassificationModel) extends Singl
         oldDataset,
         strategy,
         getNumTrees,
-        getFeatureSubsetStrategy,
+        "all",
         getSeed,
         Some(instr)
       )

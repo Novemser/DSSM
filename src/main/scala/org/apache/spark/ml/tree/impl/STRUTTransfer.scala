@@ -441,13 +441,13 @@ object STRUTTransfer extends ModelTransfer {
   }
 
   /**
-    *
-    * @param binAggregates
-    * @param splits
-    * @param featuresForNode
-    * @param node
-    * @return Array of split, stats, divergenceGain, invertedDivergenceGain
-    */
+   *
+   * @param binAggregates
+   * @param splits
+   * @param featuresForNode
+   * @param node
+   * @return Array of split, stats, divergenceGain, invertedDivergenceGain
+   */
   private def updateStats(binAggregates: DTStatsAggregator,
                           splits: Array[Array[Split]],
                           featuresForNode: Option[Array[Int]],
@@ -459,11 +459,14 @@ object STRUTTransfer extends ModelTransfer {
     // Calculate InformationGain and ImpurityStats if current node is top node
     val level = LearningNode.indexToLevel(node.id)
     var gainAndImpurityStats: ImpurityStats = null
+    if (node.split.isEmpty) {
+      println("WHY???")
+    }
 
     val oldStats = node.stats
 
     val validFeatureSplits =
-      Range(0, binAggregates.metadata.numFeaturesPerNode).view
+      Range(0, binAggregates.metadata.numFeaturesPerNode)
         .map { featureIndexIdx =>
           featuresForNode
             .map(features => (featureIndexIdx, features(featureIndexIdx)))
@@ -472,139 +475,148 @@ object STRUTTransfer extends ModelTransfer {
         .withFilter {
           case (_, featureIndex) =>
             binAggregates.metadata.numSplits(featureIndex) != 0 &&
-            node.split.nonEmpty &&
+              node.split.nonEmpty &&
               node.split.get.featureIndex == featureIndex
         }
 
+//    println(s"validFeatureSplits.map(_ => 1).sum:${validFeatureSplits.map(_ => 1).sum}")
+
     // update those non continuous features
-    val (continuousSplits, notContinuousSplits) =
-      validFeatureSplits.partition {
-        case (_, featureIndex) => shouldRecalculateStats(featureIndex)
-      }
-
-    val newSplitAndImpurityInfo =
-      notContinuousSplits.map {
-      case (featureIndexIdx, featureIndex) =>
-        val numSplits = binAggregates.metadata.numSplits(featureIndex)
-        if (binAggregates.metadata.isUnordered(featureIndex)) {
-          // Unordered categorical feature
-          val leftChildOffset = binAggregates.getFeatureOffset(featureIndexIdx)
-          val (bestFeatureSplitIndex, bestFeatureGainStats) =
-            Range(0, numSplits)
-              .map { splitIndex =>
-                val leftChildStats =
-                  binAggregates.getImpurityCalculator(leftChildOffset, splitIndex)
-                val rightChildStats = binAggregates
-                  .getParentImpurityCalculator()
-                  .subtract(leftChildStats)
-                gainAndImpurityStats = calculateImpurityStats(
-                  gainAndImpurityStats,
-                  leftChildStats,
-                  rightChildStats,
-                  binAggregates.metadata
-                )
-                (splitIndex, gainAndImpurityStats)
-              }
-              .maxBy(_._2.gain)
-          (splits(featureIndex)(bestFeatureSplitIndex), bestFeatureGainStats)
-        } else {
-          // Ordered categorical feature
-          val nodeFeatureOffset = binAggregates.getFeatureOffset(featureIndexIdx)
-          val numCategories = binAggregates.metadata.numBins(featureIndex)
-
-          /* Each bin is one category (feature value).
-           * The bins are ordered based on centroidForCategories, and this ordering determines which
-           * splits are considered.  (With K categories, we consider K - 1 possible splits.)
-           *
-           * centroidForCategories is a list: (category, centroid)
-           */
-          val centroidForCategories = Range(0, numCategories).map { featureValue =>
-            val categoryStats =
-              binAggregates.getImpurityCalculator(nodeFeatureOffset, featureValue)
-            val centroid = if (categoryStats.count != 0) {
-              if (binAggregates.metadata.isMulticlass) {
-                // multiclass classification
-                // For categorical variables in multiclass classification,
-                // the bins are ordered by the impurity of their corresponding labels.
-                categoryStats.calculate()
-              } else if (binAggregates.metadata.isClassification) {
-                // binary classification
-                // For categorical variables in binary classification,
-                // the bins are ordered by the count of class 1.
-                categoryStats.stats(1)
-              } else {
-                // regression
-                // For categorical variables in regression and binary classification,
-                // the bins are ordered by the prediction.
-                categoryStats.predict
-              }
-            } else {
-              Double.MaxValue
-            }
-            (featureValue, centroid)
-          }
-
-          logDebug("Centroids for categorical variable: " + centroidForCategories.mkString(","))
-
-          // bins sorted by centroids
-          val categoriesSortedByCentroid = centroidForCategories.toList.sortBy(_._2)
-
-          logDebug(
-            "Sorted centroids for categorical variable = " +
-              categoriesSortedByCentroid.mkString(",")
-          )
-
-          // Cumulative sum (scanLeft) of bin statistics.
-          // Afterwards, binAggregates for a bin is the sum of aggregates for
-          // that bin + all preceding bins.
-          var splitIndex = 0
-          while (splitIndex < numSplits) {
-            val currentCategory = categoriesSortedByCentroid(splitIndex)._1
-            val nextCategory = categoriesSortedByCentroid(splitIndex + 1)._1
-            binAggregates.mergeForFeature(nodeFeatureOffset, nextCategory, currentCategory)
-            splitIndex += 1
-          }
-          // lastCategory = index of bin with total aggregates for this (node, feature)
-          val lastCategory = categoriesSortedByCentroid.last._1
-          // Find best split.
-          val (bestFeatureSplitIndex, bestFeatureGainStats) =
-            Range(0, numSplits)
-              .map { splitIndex =>
-                val featureValue = categoriesSortedByCentroid(splitIndex)._1
-                val leftChildStats =
-                  binAggregates.getImpurityCalculator(nodeFeatureOffset, featureValue)
-                val rightChildStats =
-                  binAggregates.getImpurityCalculator(nodeFeatureOffset, lastCategory)
-                rightChildStats.subtract(leftChildStats)
-                gainAndImpurityStats = calculateImpurityStats(
-                  gainAndImpurityStats,
-                  leftChildStats,
-                  rightChildStats,
-                  binAggregates.metadata
-                )
-                (splitIndex, gainAndImpurityStats)
-              }
-              .maxBy(_._2.gain)
-          val categoriesForSplit =
-            categoriesSortedByCentroid.map(_._1.toDouble).slice(0, bestFeatureSplitIndex + 1)
-          // 放在categoriesForSplit是走左边 true
-          val bestFeatureSplit =
-            new CategoricalSplit(featureIndex, categoriesForSplit.toArray, numCategories)
-          (bestFeatureSplit, bestFeatureGainStats)
-        }
+    val continuousSplits = validFeatureSplits.withFilter {
+      case (_, featureIndex) => shouldRecalculateStats(featureIndex)
     }
 
-    if (newSplitAndImpurityInfo.nonEmpty) {
-      val impurityInfo = newSplitAndImpurityInfo.head
+    val nonContinuousSplits = validFeatureSplits.withFilter {
+      case (_, featureIndex) => !shouldRecalculateStats(featureIndex)
+    }
+
+    val nonContinuousSplitAndImpurityInfo =
+      nonContinuousSplits.map {
+        case (featureIndexIdx, featureIndex) =>
+          val numSplits = binAggregates.metadata.numSplits(featureIndex)
+          if (binAggregates.metadata.isUnordered(featureIndex)) {
+            // Unordered categorical feature
+            val leftChildOffset = binAggregates.getFeatureOffset(featureIndexIdx)
+            val (bestFeatureSplitIndex, bestFeatureGainStats) =
+              Range(0, numSplits)
+                .map { splitIndex =>
+                  val leftChildStats =
+                    binAggregates.getImpurityCalculator(leftChildOffset, splitIndex)
+                  val rightChildStats = binAggregates
+                    .getParentImpurityCalculator()
+                    .subtract(leftChildStats)
+                  gainAndImpurityStats = calculateImpurityStats(
+                    gainAndImpurityStats,
+                    leftChildStats,
+                    rightChildStats,
+                    binAggregates.metadata
+                  )
+                  (splitIndex, gainAndImpurityStats)
+                }
+                .maxBy(_._2.gain)
+            (splits(featureIndex)(bestFeatureSplitIndex), bestFeatureGainStats)
+          } else {
+            // Ordered categorical feature
+            val nodeFeatureOffset = binAggregates.getFeatureOffset(featureIndexIdx)
+            val numCategories = binAggregates.metadata.numBins(featureIndex)
+
+            /* Each bin is one category (feature value).
+             * The bins are ordered based on centroidForCategories, and this ordering determines which
+             * splits are considered.  (With K categories, we consider K - 1 possible splits.)
+             *
+             * centroidForCategories is a list: (category, centroid)
+             */
+            val centroidForCategories = Range(0, numCategories).map { featureValue =>
+              val categoryStats =
+                binAggregates.getImpurityCalculator(nodeFeatureOffset, featureValue)
+              val centroid = if (categoryStats.count != 0) {
+                if (binAggregates.metadata.isMulticlass) {
+                  // multiclass classification
+                  // For categorical variables in multiclass classification,
+                  // the bins are ordered by the impurity of their corresponding labels.
+                  categoryStats.calculate()
+                } else if (binAggregates.metadata.isClassification) {
+                  // binary classification
+                  // For categorical variables in binary classification,
+                  // the bins are ordered by the count of class 1.
+                  categoryStats.stats(1)
+                } else {
+                  // regression
+                  // For categorical variables in regression and binary classification,
+                  // the bins are ordered by the prediction.
+                  categoryStats.predict
+                }
+              } else {
+                Double.MaxValue
+              }
+              (featureValue, centroid)
+            }
+
+            logDebug("Centroids for categorical variable: " + centroidForCategories.mkString(","))
+
+            // bins sorted by centroids
+            val categoriesSortedByCentroid = centroidForCategories.toList.sortBy(_._2)
+
+            logDebug(
+              "Sorted centroids for categorical variable = " +
+                categoriesSortedByCentroid.mkString(",")
+            )
+
+            // Cumulative sum (scanLeft) of bin statistics.
+            // Afterwards, binAggregates for a bin is the sum of aggregates for
+            // that bin + all preceding bins.
+            var splitIndex = 0
+            while (splitIndex < numSplits) {
+              val currentCategory = categoriesSortedByCentroid(splitIndex)._1
+              val nextCategory = categoriesSortedByCentroid(splitIndex + 1)._1
+              binAggregates.mergeForFeature(nodeFeatureOffset, nextCategory, currentCategory)
+              splitIndex += 1
+            }
+            // lastCategory = index of bin with total aggregates for this (node, feature)
+            val lastCategory = categoriesSortedByCentroid.last._1
+            // Find best split.
+            val (bestFeatureSplitIndex, bestFeatureGainStats) =
+              Range(0, numSplits)
+                .map { splitIndex =>
+                  val featureValue = categoriesSortedByCentroid(splitIndex)._1
+                  val leftChildStats =
+                    binAggregates.getImpurityCalculator(nodeFeatureOffset, featureValue)
+                  val rightChildStats =
+                    binAggregates.getImpurityCalculator(nodeFeatureOffset, lastCategory)
+                  rightChildStats.subtract(leftChildStats)
+                  gainAndImpurityStats = calculateImpurityStats(
+                    gainAndImpurityStats,
+                    leftChildStats,
+                    rightChildStats,
+                    binAggregates.metadata
+                  )
+                  (splitIndex, gainAndImpurityStats)
+                }
+                .maxBy(_._2.gain)
+            val categoriesForSplit =
+              categoriesSortedByCentroid.map(_._1.toDouble).slice(0, bestFeatureSplitIndex + 1)
+            // 放在categoriesForSplit是走左边 true
+            val bestFeatureSplit =
+              new CategoricalSplit(featureIndex, categoriesForSplit.toArray, numCategories)
+            (bestFeatureSplit, bestFeatureGainStats)
+          }
+      }
+
+    if (nonContinuousSplitAndImpurityInfo.nonEmpty) {
+      val impurityInfo = nonContinuousSplitAndImpurityInfo.maxBy(_._2.gain)
       node.split = Some(impurityInfo._1)
       node.stats = impurityInfo._2
-//      if (node.leftChild.nonEmpty) {
-//        node.leftChild.get.stats =
-//      }
+      if (!node.stats.valid) {
+        // Prune this node
+        node.isLeaf = true
+        node.leftChild = None
+        node.rightChild = None
+      }
+      return Array()
     }
 
     // For each (feature, split), calculate the gain, and select the best (feature, split).
-    val splitsAndImpurityInfo =
+    val continuousSplitsAndImpurityInfo =
       continuousSplits.flatMap {
         case (featureIndexIdx, featureIndex) =>
           val numSplits = binAggregates.metadata.numSplits(featureIndex)
@@ -634,15 +646,18 @@ object STRUTTransfer extends ModelTransfer {
               (splits(featureIndex)(splitIdx), gainAndImpurityStats)
             }
       }
+//    println(s"numFeaturesPerNode:${binAggregates.metadata.numFeaturesPerNode},nonContinuousSplitAndImpurityInfo:${nonContinuousSplitAndImpurityInfo.size},continuousSplits:${continuousSplitsAndImpurityInfo.size}")
 
-    def calcJSD(calcUnderTest: ImpurityCalculator,
-                origCalc: ImpurityCalculator,
-                numClasses: Int): Double = {
+//    println(s"binAggregates.metadata.numFeaturesPerNode:${binAggregates.metadata.numFeaturesPerNode}" +
+//      s"continuousSplitsAndImpurityInfo.size:${continuousSplitsAndImpurityInfo.size}," +
+//      s"nonContinuousSplitAndImpurityInfo.size:${nonContinuousSplitAndImpurityInfo.size}")
+
+    def calcJSD(calcUnderTest: ImpurityCalculator, origCalc: ImpurityCalculator, numClasses: Int): Double = {
       var jsp = 0.0d
       Range(0, numClasses).foreach { cls =>
         {
           val o = calcUnderTest.prob(cls)
-          val e = origCalc.prob(cls)
+          val e = if (cls < origCalc.stats.length) origCalc.prob(cls) else 0
           val m = (o + e) / 2
           if (!Utils.eq(m, 0)) {
             var logO = Utils.log2(o / m) * o
@@ -657,16 +672,16 @@ object STRUTTransfer extends ModelTransfer {
     }
 
     def calcPartJSD(partLeft: ImpurityCalculator,
-                partRight: ImpurityCalculator,
-                origLeft: ImpurityCalculator,
-                origRight: ImpurityCalculator,
-                numClasses: Int): Double = {
+                    partRight: ImpurityCalculator,
+                    origLeft: ImpurityCalculator,
+                    origRight: ImpurityCalculator,
+                    numClasses: Int): Double = {
       val total = 1.0d * partLeft.count + partRight.count
       calcJSD(partLeft, origLeft, numClasses) * (partLeft.count / total) +
-      calcJSD(partRight, origRight, numClasses) * (partRight.count / total)
+        calcJSD(partRight, origRight, numClasses) * (partRight.count / total)
     }
 
-    val res = splitsAndImpurityInfo
+    val res = continuousSplitsAndImpurityInfo
       .filter(t => {
         t._2.leftImpurityCalculator != null &&
         t._2.rightImpurityCalculator != null
@@ -685,9 +700,9 @@ object STRUTTransfer extends ModelTransfer {
         jsds(1) = calcPartJSD(newRight, newLeft, oldLeft, oldRight, numClasses)
         val divergenceGain = 1 - jsds(0)
         val invertedDivergenceGain = 1 - jsds(1)
-        logWarning(
-          s"DG1:$divergenceGain, DG2:$invertedDivergenceGain"
-        )
+//        logWarning(
+//          s"DG1:$divergenceGain, DG2:$invertedDivergenceGain"
+//        )
 
         (t._1, t._2, divergenceGain, invertedDivergenceGain)
       })
@@ -695,7 +710,13 @@ object STRUTTransfer extends ModelTransfer {
 
     // if there's no data point reaching this node, prune the node.
     if (res.isEmpty) {
-      logWarning(s"pruning node: ${node.id}")
+//      println(s"res.isEmpty->continuousSplitsAndImpurityInfo:${continuousSplitsAndImpurityInfo.size}")
+      if (continuousSplitsAndImpurityInfo.nonEmpty) {
+        val maxGainSplit = continuousSplitsAndImpurityInfo.maxBy(_._2.gain)
+        node.split = Some(maxGainSplit._1)
+        node.stats = maxGainSplit._2
+      }
+      logInfo(s"pruning node: ${node.id}")
       node.isLeaf = true
       node.leftChild = None
       node.rightChild = None

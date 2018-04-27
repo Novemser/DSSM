@@ -1,15 +1,16 @@
 package org.apache.spark.ml.classification
+
+import java.util.concurrent.ThreadLocalRandom
+
 import org.apache.spark.ml.feature.LabeledPoint
-import org.apache.spark.ml.tree.impl.{RichDecisionTreeClassificationModel, SERTransfer, STRUTTransfer, TransferRandomForest}
+import org.apache.spark.ml.tree.impl.{RichDecisionTreeClassificationModel, SERTransfer, STRUTTransfer}
 import org.apache.spark.ml.util.{Instrumentation, MetadataUtils}
 import org.apache.spark.mllib.tree.configuration.Algo
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.Dataset
 
-class STRUTClassifier(source: RichRandomForestClassificationModel) extends SingleSourceModelTransfer {
-
+class MixClassifier(source: RichRandomForestClassificationModel) extends SingleSourceModelTransfer {
   setNumTrees(source._trees.length)
-
   override def train(dataset: Dataset[_]): RandomForestClassificationModel = {
     logInfo(s"Transferring $getNumTrees trees")
     val categoricalFeatures: Map[Int, Int] =
@@ -51,22 +52,42 @@ class STRUTClassifier(source: RichRandomForestClassificationModel) extends Singl
       checkpointInterval
     )
 
-    val transferTrees = STRUTTransfer
+    require(getNumTrees > 1, "There must be at least 2 trees for transfer learning in MIX classifier.")
+
+    // Partition randomly into two group
+    val serTrees = source._trees.take((getNumTrees + 1) / 2)
+    val strutTrees = source._trees.takeRight(getNumTrees / 2)
+
+    val transferredStrutTrees = STRUTTransfer
       .transferModels(
-        source._trees.map(_.asInstanceOf[RichDecisionTreeClassificationModel]),
+        strutTrees.map(_.asInstanceOf[RichDecisionTreeClassificationModel]),
         oldDataset,
         strategy,
-        getNumTrees,
+        strutTrees.length,
         "all",
         getSeed,
         Some(instr)
       )
 
+    val transferredSearTrees = SERTransfer
+      .transferModels(
+        serTrees.map(_.asInstanceOf[RichDecisionTreeClassificationModel]),
+        oldDataset,
+        strategy,
+        serTrees.length,
+        getFeatureSubsetStrategy,
+        getSeed,
+        Some(instr)
+      )
+
+    val transferTrees = transferredStrutTrees ++ transferredSearTrees
+
+    val numFeatures = oldDataset.first().features.size
     val m = new RandomForestClassificationModel(
       uid,
       transferTrees.map(_.asInstanceOf[DecisionTreeClassificationModel]),
-      source.numFeatures,
-      source.numClasses
+      numFeatures,
+      math.min(source.numClasses, numClasses)
     )
     instr.logSuccess(m)
     m

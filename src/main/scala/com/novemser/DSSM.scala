@@ -1,7 +1,6 @@
 package com.novemser
 
-import com.novemser.util.Timer
-import org.apache.spark.SparkConf
+import com.novemser.util.{SparkManager, Timer}
 import org.apache.spark.ml.classification._
 import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
 import org.apache.spark.ml.feature._
@@ -10,7 +9,7 @@ import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.tree.impl.Utils
 import org.apache.spark.ml.{Pipeline, PipelineModel}
 import org.apache.spark.mllib.util.MLUtils
-import org.apache.spark.sql.{DataFrame, Row, SparkSession}
+import org.apache.spark.sql.{DataFrame, Row}
 
 import scala.collection.mutable
 
@@ -18,18 +17,8 @@ object TreeType extends Enumeration {
   val SER, STRUT, MIX = Value
 }
 
-object LearnMLlib {
-  private val conf = new SparkConf()
-    .setAppName("Transfer learning")
-    .set("spark.executor.memory", "7g")
-    .setMaster("spark://192.168.1.8:7077")
-//    .setMaster("local[*]")
-
-  private val spark = SparkSession
-    .builder()
-    .config(conf)
-    .getOrCreate()
-  spark.sparkContext.setLogLevel("WARN")
+object DSSM {
+  private val spark = SparkManager.getSpark
 
   def simple(): Unit = {
     // Prepare training data from a list of (label, features) tuples.
@@ -908,52 +897,7 @@ object LearnMLlib {
     )
   }
 
-  def testHumanActivity(filters: Array[(String, String)], treeType: TreeType.Value): Unit = {
-    val data = spark.read
-      .option("header", "true")
-      .option("inferSchema", true)
-      .csv("hdfs://novemser:9000/data/Phones_accelerometer.csv")
-      .withColumnRenamed("gt", "class")
-//      .drop("model")
-      .drop("device")
-      .drop("Index")
-      .drop("User")
-      .filter("class != 'null'")
-      .repartition(44 * 3)
-    import org.apache.spark.sql.functions._
-
-    filters.foreach(filter => {
-      val source = data.filter(filter._1).drop("model")
-        .withColumn("class", when(col("class") === "stairsdown", "stairs"))
-        .withColumn("class", when(col("class") === "stairsup", "stairs"))
-      val target = data.filter(filter._2).drop("model")
-        .withColumn("class", when(col("class") === "stairsdown", "stairs"))
-        .withColumn("class", when(col("class") === "stairsup", "stairs"))
-      println(s"Source(${filter._1}):${source.count()}, Tgt(${filter._2}):${target.count()}")
-      val Array(l, r) = target.randomSplit(Array(0.8, 0.2), 1)
-
-      val timer = new Timer()
-        .initTimer("src")
-        .initTimer("transfer")
-      doExperiment(source, l, r, timer = timer, treeType = treeType)
-      timer.printTime()
-    })
-  }
-
   def main(args: Array[String]): Unit = {
-//    testHumanActivity(
-//      Array(
-////        ("model = 'samsungold'", "model != 'samsungold'"),
-////        ("model = 's3mini'", "model != 's3mini'"),
-////        ("model = 'nexus4'", "model != 'nexus4'"),
-////        ("model = 's3'", "model != 's3'")
-////        ("class = 'stand'", "class != 'stand'"),
-//        ("class = 'stairsdown'", "class = 'stairsup'"),
-//        ("class = 'stairsup'", "class = 'stairsdown'")
-////        ("class = 'walk'", "class != 'walk'")
-//      ),
-//      TreeType.SER
-//    )
 //    testMIX()
 //    testNumeric()
 //    testStrut()

@@ -7,14 +7,14 @@ object HHAR {
   private val spark = SparkManager.getSpark
 
   /**
-    * 1. 有很多nexus4手机的data,少量SamsungS+手机数据,预测迁移后的模型在所有三星手机中的预测效果
-    *     - SamsungS+迁移用的数量从10-15-20-25-30-35-40-45-50
-    *     - SamsungS3         ----
-    *     - SamsungS3mini     ----
-    * skyline:全部的三星手机
-    * hunch:迁移数据越多越准确
-    *
-    */
+   * 1. 有很多nexus4手机的data,少量SamsungS+手机数据,预测迁移后的模型在所有三星手机中的预测效果
+   *     - SamsungS+迁移用的数量从10-15-20-25-30-35-40-45-50
+   *     - SamsungS3         ----
+   *     - SamsungS3mini     ----
+   * skyline:全部的三星手机
+   * hunch:迁移数据越多越准确
+   *
+   */
   def test1(treeType: TreeType.Value): Unit = {
     val data = spark.read
       .option("header", "true")
@@ -26,39 +26,42 @@ object HHAR {
       .drop("Index")
       .drop("User")
       .filter("class != 'null'")
-      .repartition(44)
+      .repartition(44 * 3)
 
-    val nexus4Data = data.filter("model = 'nexus4'")
-    val s3Data = data.filter("model = 's3'")
-    val splusData = data.filter("model = 'samsungold'")
-    val s3miniData = data.filter("model = 's3mini'")
+    val nexus4Data = data.filter("model = 'nexus4'").drop("model")
+    val s3Data = data.filter("model = 's3'").drop("model")
+    val splusData = data.filter("model = 'samsungold'").drop("model")
+    val s3miniData = data.filter("model = 's3mini'").drop("model")
     val expMap = Map(
-      "s3" -> s3Data.drop("model"),
-      "s+" -> splusData.drop("model"),
-      "s3mini" -> s3miniData.drop("model")
+      "s3" -> s3Data,
+      "s+" -> splusData,
+      "s3mini" -> s3miniData
     )
-    expMap.values.foreach { _.cache }
+//    expMap.values.foreach { _.cache }
 
-    Range(10, 50, 5).foreach { transferPercent => {
-      expMap.foreach(kv => {
-        val timer = new Timer()
-          .initTimer("src")
-          .initTimer("transfer")
-        val tgtData = kv._2
-        println(s"Doing experiment:${kv._1}, percent:$transferPercent")
-        val Array(transferData, _) = tgtData.randomSplit(Array(transferPercent, 100 - transferPercent))
-        val (srcErr, transErr) =
-          doExperiment(nexus4Data, transferData, tgtData, treeType = treeType, maxDepth = 20, timer = timer)
-        println(s"in exp..srcErr, transErr=${(srcErr, transErr)}")
-        timer.printTime()
-        timer.reset()
-        timer.initTimer("src")
-        val (tgtErr, _) =
-          doExperiment(tgtData, tgtData, tgtData, treeType = treeType, maxDepth = 20, srcOnly = true, timer = timer)
-        timer.printTime()
-        println(s"End experiment:${kv._1}, percent:$transferPercent whth SrcErr:$srcErr,TgtErr:$tgtErr,TransferErr:$transErr")
-      })
-    }
+    Range(10, 50, 5).foreach { transferPercent =>
+      {
+        expMap.foreach(kv => {
+          val timer = new Timer()
+            .initTimer("src")
+            .initTimer("transfer")
+          val tgtData = kv._2
+          println(s"Doing experiment:${kv._1}, percent:$transferPercent")
+          val Array(transferData, _) = tgtData.randomSplit(Array(transferPercent, 100 - transferPercent))
+          val (srcErr, transErr) =
+            doExperiment(nexus4Data, transferData, tgtData, treeType = treeType, timer = timer)
+          println(s"in exp..srcErr, transErr=${(srcErr, transErr)}")
+          timer.printTime()
+          timer.reset()
+          timer.initTimer("src")
+          val (tgtErr, _) =
+            doExperiment(tgtData, tgtData, tgtData, treeType = treeType, srcOnly = true, timer = timer)
+          timer.printTime()
+          println(
+            s"End experiment:${kv._1}, percent:$transferPercent whth SrcErr:$srcErr,TgtErr:$tgtErr,TransferErr:$transErr"
+          )
+        })
+      }
     }
 
 //    import org.apache.spark.sql.functions._

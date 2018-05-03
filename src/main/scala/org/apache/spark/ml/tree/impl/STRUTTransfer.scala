@@ -456,12 +456,8 @@ object STRUTTransfer extends ModelTransfer {
     def shouldRecalculateStats(featureIndex: Int): Boolean =
       binAggregates.metadata.isContinuous(featureIndex)
 
-    // Calculate InformationGain and ImpurityStats if current node is top node
-    val level = LearningNode.indexToLevel(node.id)
+    // Calculate InformationGain and ImpurityStats
     var gainAndImpurityStats: ImpurityStats = null
-    if (node.split.isEmpty) {
-      println("WHY???")
-    }
 
     val oldStats = node.stats
 

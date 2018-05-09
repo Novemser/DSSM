@@ -9,6 +9,7 @@ import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.tree.impl.Utils
 import org.apache.spark.ml.{Pipeline, PipelineModel}
 import org.apache.spark.mllib.util.MLUtils
+import org.apache.spark.sql.types.{DoubleType, IntegerType, StructField, StructType}
 import org.apache.spark.sql.{DataFrame, Row}
 
 import scala.collection.mutable
@@ -897,12 +898,36 @@ object DSSM {
     )
   }
 
+  def testUsps(treeType: TreeType.Value): Unit = {
+    val ministData = ReadHelper
+      .getMnistData("train-labels.idx1-ubyte", "train-images.idx3-ubyte")
+      .slice(0, 20000)
+    import spark.implicits._
+
+    val md = ministData.map(line => {Row(line:_*)}).toSeq
+    val sfs = Range(1, ministData.head.length + 1).map( idx => {
+      if (idx == 785) {
+        StructField(s"class", DoubleType, nullable = false)
+      } else {
+        StructField(s"col$idx", DoubleType, nullable = false)
+      }
+    })
+    val schema = StructType(sfs)
+    val df = spark.createDataFrame(
+      spark.sparkContext.parallelize(md),
+      schema = schema
+    )
+    df.printSchema()
+//    df.show(20)
+  }
+
   def main(args: Array[String]): Unit = {
 //    testMIX()
 //    testNumeric()
 //    testStrut()
 //    testLetter(TreeType.MIX)
-    testWine(TreeType.MIX)
+//    testWine(TreeType.MIX)
+    testUsps(TreeType.SER)
 //    testDigits(TreeType.MIX)
 //    testLandMine(TreeType.MIX)
 //    testMushroom(TreeType.MIX)

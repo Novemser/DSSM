@@ -647,7 +647,8 @@ object DSSM {
                    treeType: TreeType.Value = TreeType.SER,
                    maxDepth: Int = 10,
                    timer: Timer = new Timer,
-                   srcOnly: Boolean = false): (Double, Double) = {
+                   srcOnly: Boolean = false,
+                   seed: Int = 1): (Double, Double) = {
 //    printInfo(source, target, test)
 
     val trainLabelIndexer = new StringIndexer()
@@ -674,10 +675,11 @@ object DSSM {
     rf.setFeaturesCol { trainAssembler.getOutputCol }
       .setLabelCol { trainLabelIndexer.getOutputCol }
       .setMaxDepth(maxDepth)
+      .setSeed(seed)
       .setNumTrees(numTrees)
 
     treeType match {
-      case TreeType.SER   => rf.setImpurity("gini")
+      case TreeType.SER   => rf.setImpurity("entropy")
       case TreeType.STRUT => rf.setImpurity("entropy")
       case TreeType.MIX   => rf.setImpurity("entropy")
     }
@@ -703,7 +705,7 @@ object DSSM {
     }
 
     treeType match {
-      case TreeType.SER   => classifier.setImpurity("gini")
+      case TreeType.SER   => classifier.setImpurity("entropy")
       case TreeType.STRUT => classifier.setImpurity("entropy")
       case TreeType.MIX   => classifier.setImpurity("entropy")
     }
@@ -712,6 +714,7 @@ object DSSM {
       .setFeaturesCol { trainAssembler.getOutputCol }
       .setLabelCol { trainLabelIndexer.getOutputCol }
       .setMaxDepth { maxDepth }
+      .setSeed { seed }
 
     val transferPipeline = new Pipeline()
       .setStages(Array(transferLabelIndexer, transferAssembler, classifier, labelConverter))

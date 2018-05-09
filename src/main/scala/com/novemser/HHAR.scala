@@ -26,39 +26,50 @@ object HHAR {
       .drop("Index")
       .drop("User")
       .filter("class != 'null'")
-      .repartition(44 * 3)
+//      .repartition(24 * 4)
 
-    val nexus4Data = data.filter("model = 'nexus4'").drop("model")
+    val nexus4 = data.filter("model = 'nexus4'").drop("model")
     val s3Data = data.filter("model = 's3'").drop("model")
     val splusData = data.filter("model = 'samsungold'").drop("model")
     val s3miniData = data.filter("model = 's3mini'").drop("model")
     val expMap = Map(
-      "s3" -> s3Data,
+//      "s3" -> s3Data,
       "s+" -> splusData,
       "s3mini" -> s3miniData
+//      "nexus4" -> nexus4
     )
-//    expMap.values.foreach { _.cache }
+    nexus4.cache()
+    val sourceData = nexus4 //.randomSplit(Array(0.1, 99.9))(0)
+    expMap.values.foreach { _.cache }
+    var tE = -1.0d
 
-    Range(10, 50, 5).foreach { transferPercent =>
+    Range(10, 80, 10).foreach { transferPercent =>
       {
         expMap.foreach(kv => {
           val timer = new Timer()
             .initTimer("src")
             .initTimer("transfer")
           val tgtData = kv._2
-          println(s"Doing experiment:${kv._1}, percent:$transferPercent")
-          val Array(transferData, _) = tgtData.randomSplit(Array(transferPercent, 100 - transferPercent))
+          val tp = transferPercent
+          println(s"Doing experiment:${kv._1}, percent:$tp")
+          val Array(transferData, _) = tgtData.randomSplit(Array(tp, 100 - tp), 1)
+          transferData.cache()
+          println(s"transferData count:${transferData.count()}")
           val (srcErr, transErr) =
-            doExperiment(nexus4Data, transferData, tgtData, treeType = treeType, timer = timer)
+            doExperiment(sourceData, transferData, tgtData, treeType = treeType, timer = timer)
           println(s"in exp..srcErr, transErr=${(srcErr, transErr)}")
           timer.printTime()
           timer.reset()
           timer.initTimer("src")
+//          if (tE < 0) {
           val (tgtErr, _) =
-            doExperiment(tgtData, tgtData, tgtData, treeType = treeType, srcOnly = true, timer = timer)
+            doExperiment(transferData, transferData, tgtData, treeType = treeType, srcOnly = true, timer = timer)
+          tE = tgtErr
           timer.printTime()
+          transferData.unpersist()
+          //          }
           println(
-            s"End experiment:${kv._1}, percent:$transferPercent whth SrcErr:$srcErr,TgtErr:$tgtErr,TransferErr:$transErr"
+            s"End experiment:${kv._1}, percent:$transferPercent whth SrcErr:$srcErr,TgtErr:$tE,TransferErr:$transErr"
           )
         })
       }
@@ -85,6 +96,7 @@ object HHAR {
   }
 
   def main(args: Array[String]): Unit = {
+    println("=============================================STRUT============")
     test1(
 //      Array(
 //        //        ("model = 'samsungold'", "model != 'samsungold'"),
@@ -96,8 +108,10 @@ object HHAR {
 //        ("class = 'stairsup'", "class = 'stairsdown'")
 //        //        ("class = 'walk'", "class != 'walk'")
 //      ),
-      TreeType.SER
+      TreeType.STRUT
     )
+    println("=============================================Mix============")
+    test1(TreeType.MIX)
 
   }
 }

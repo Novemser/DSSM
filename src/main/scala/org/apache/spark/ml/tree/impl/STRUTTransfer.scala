@@ -150,8 +150,6 @@ object STRUTTransfer extends ModelTransfer {
         // Each group of nodes may come from one or multiple trees, and at multiple levels.
         val (nodesForGroup, treeToNodeToIndexInfo) =
           RandomForest.selectNodesToSplit(nodeStack, maxMemoryUsage, metadata, rng)
-        //      val indexInfo = treeToNodeToIndexInfo.values.flatMap(_.values).mkString(",")
-        //      println(s"indexInfo:$indexInfo")
         // Sanity check (should never occur):
         assert(
           nodesForGroup.nonEmpty,
@@ -163,7 +161,8 @@ object STRUTTransfer extends ModelTransfer {
           nodesForGroup.keys.map(treeIdx => treeIdx -> topNodes(treeIdx)).toMap
 
         timer.start("calculateNewSplitsStats")
-        calculateNewSplitsStats(
+        STRUTTransfer
+          .calculateNewSplitsStats(
           baggedInput,
           metadata,
           topNodesForGroup,
@@ -221,13 +220,6 @@ object STRUTTransfer extends ModelTransfer {
     }
   }
 
-  private def normalize(input: Array[Double]): Unit = {
-    val sum = input.sum
-    for (elem <- input.zipWithIndex) {
-      input(elem._2) = elem._1 / sum
-    }
-  }
-
   private def calculateNewSplitsStats(input: RDD[BaggedPoint[TreePoint]],
                                       metadata: DecisionTreeMetadata,
                                       topNodesForGroup: Map[Int, LearningNode],
@@ -271,7 +263,6 @@ object STRUTTransfer extends ModelTransfer {
           val path = topNodesForGroup(treeIndex)
             .asInstanceOf[TransferLearningNode]
             .predictPath(baggedPoint.datum.binnedFeatures, splits)
-//          logWarning(s"path for node:${path.mkString(",")}")
           // We need to add current point info into all nodes in it's prediction path.
           path.foreach(nodeIndex => {
             val nodeIndexInfo = nodeIndexToInfo.getOrElse(nodeIndex, null)
@@ -325,25 +316,7 @@ object STRUTTransfer extends ModelTransfer {
     val nodeToFeatures = getNodeToFeatures(treeToNodeToIndexInfo)
     val nodeToFeaturesBc = input.sparkContext.broadcast(nodeToFeatures)
 
-    val partitionAggregates: RDD[(Int, DTStatsAggregator)] = if (nodeIdCache.nonEmpty) {
-      input.zip(nodeIdCache.get.nodeIdsForInstances).mapPartitions { points =>
-        // Construct a nodeStatsAggregators array to hold node aggregate stats,
-        // each node will have a nodeStatsAggregator
-        val nodeStatsAggregators = Array.tabulate(numNodes) { nodeIndex =>
-          val featuresForNode = nodeToFeaturesBc.value.map { nodeToFeatures =>
-            nodeToFeatures(nodeIndex)
-          }
-          new DTStatsAggregator(metadata, featuresForNode)
-        }
-
-        // iterator all instances in current partition and update aggregate stats
-        points.foreach(binSeqOpWithNodeIdCache(nodeStatsAggregators, _))
-
-        // transform nodeStatsAggregators array to (nodeIndex, nodeAggregateStats) pairs,
-        // which can be combined with other partition using `reduceByKey`
-        nodeStatsAggregators.view.zipWithIndex.map(_.swap).iterator
-      }
-    } else {
+    val partitionAggregates: RDD[(Int, DTStatsAggregator)] =
       input.mapPartitions { points =>
         // Construct a nodeStatsAggregators array to hold node aggregate stats,
         // each node will have a nodeStatsAggregator
@@ -357,18 +330,16 @@ object STRUTTransfer extends ModelTransfer {
           binSeqOp(nodeStatsAggregators, point)
         })
 
-//        println(s"NST:${nodeStatsAggregators.mkString(",")}")
         nodeStatsAggregators.zipWithIndex.map(_.swap).iterator
       }
-    }
 
     val nodeNewStatsMap = partitionAggregates
       .reduceByKey((a, b) => a.merge(b))
-      .filter {
-        case (nodeIndex, _) =>
-          val node = nodes(nodeIndex)
-          node.rightChild.nonEmpty // filter leaf nodes
-      }
+//      .filter {
+//        case (nodeIndex, _) =>
+//          val node = nodes(nodeIndex)
+//          node.rightChild.nonEmpty // filter leaf nodes
+//      }
       .map {
         case (nodeIndex, aggStats) =>
           val featuresForNode = nodeToFeaturesBc.value.flatMap { nodeToFeatures =>
@@ -377,7 +348,8 @@ object STRUTTransfer extends ModelTransfer {
 
           // find best split for each node
           val result =
-            updateStats(aggStats, splits, featuresForNode, nodes(nodeIndex))
+            STRUTTransfer
+              .updateStats(aggStats, splits, featuresForNode, nodes(nodeIndex))
           (nodeIndex, result)
       }
       .filter { _._2.length > 0 }
@@ -457,9 +429,12 @@ object STRUTTransfer extends ModelTransfer {
       binAggregates.metadata.isContinuous(featureIndex)
 
     // Calculate InformationGain and ImpurityStats
-    var gainAndImpurityStats: ImpurityStats = null
+    // If this node's feature is not numeric, just update prediction metadata
+    // otherwise, update threshold.
 
+    // old stats need to be kept for further computation
     val oldStats = node.stats
+    var gainAndImpurityStats: ImpurityStats = null
 
     val validFeatureSplits =
       Range(0, binAggregates.metadata.numFeaturesPerNode)
@@ -600,10 +575,13 @@ object STRUTTransfer extends ModelTransfer {
 
     if (nonContinuousSplitAndImpurityInfo.nonEmpty) {
       val impurityInfo = nonContinuousSplitAndImpurityInfo.maxBy(_._2.gain)
+      // update stats info
       node.split = Some(impurityInfo._1)
       node.stats = impurityInfo._2
-      if (!node.stats.valid) {
+      // if no data reach this point
+      if (!node.stats.valid || node.stats.gain < 0) {
         // Prune this node
+        logInfo(s"STRUT Pruning node:${node.id}")
         node.isLeaf = true
         node.leftChild = None
         node.rightChild = None
@@ -648,7 +626,9 @@ object STRUTTransfer extends ModelTransfer {
 //      s"continuousSplitsAndImpurityInfo.size:${continuousSplitsAndImpurityInfo.size}," +
 //      s"nonContinuousSplitAndImpurityInfo.size:${nonContinuousSplitAndImpurityInfo.size}")
 
-    def calcJSD(calcUnderTest: ImpurityCalculator, origCalc: ImpurityCalculator, numClasses: Int): Double = {
+    def calcJSD(calcUnderTest: ImpurityCalculator,
+                origCalc: ImpurityCalculator,
+                numClasses: Int): Double = {
       var jsp = 0.0d
       Range(0, numClasses).foreach { cls =>
         {
@@ -667,14 +647,14 @@ object STRUTTransfer extends ModelTransfer {
       jsp / 2
     }
 
-    def calcPartJSD(partLeft: ImpurityCalculator,
-                    partRight: ImpurityCalculator,
-                    origLeft: ImpurityCalculator,
-                    origRight: ImpurityCalculator,
+    def calcPartJSD(partLeft:   ImpurityCalculator,
+                    partRight:  ImpurityCalculator,
+                    origLeft:   ImpurityCalculator,
+                    origRight:  ImpurityCalculator,
                     numClasses: Int): Double = {
       val total = 1.0d * partLeft.count + partRight.count
-      calcJSD(partLeft, origLeft, numClasses) * (partLeft.count / total) +
-        calcJSD(partRight, origRight, numClasses) * (partRight.count / total)
+        calcJSD(partLeft , origLeft , numClasses) * (partLeft .count  / total) +
+        calcJSD(partRight, origRight, numClasses) * (partRight.count  / total)
     }
 
     val res = continuousSplitsAndImpurityInfo

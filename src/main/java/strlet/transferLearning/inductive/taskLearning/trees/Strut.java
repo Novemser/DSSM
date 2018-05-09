@@ -78,7 +78,7 @@ public class Strut extends SingleSourceModelTransfer implements
 			if (data.attribute(treeNode.m_Attribute).isNumeric()) {
 				updateThresholds(treeNode, data);
 			} else {
-				// Remember class distribution
+				// Remember class distribution for none-numeric feature
 				rememberClassDistribution(treeNode, data);
 			}
 
@@ -205,8 +205,8 @@ public class Strut extends SingleSourceModelTransfer implements
 				}
 			}
 		}
-		System.out.println("inverted_jsds[splitIndex]=" + inverted_jsds[splitIndex] +
-				", jsds[splitIndex]" + jsds[splitIndex]);
+//		System.out.println("inverted_jsds[splitIndex]=" + inverted_jsds[splitIndex] +
+//				", jsds[splitIndex]" + jsds[splitIndex]);
 		if (Utils.gr(inverted_jsds[splitIndex], jsds[splitIndex])) {
 			Node tmp = treeNode.m_Sons[0];
 			treeNode.m_Sons[0] = treeNode.m_Sons[1];

@@ -52,7 +52,6 @@
     </dependencies>
     <build>
         <sourceDirectory>src/main/scala</sourceDirectory>
-        <testSourceDirectory>src/test/scala</testSourceDirectory>
         <plugins>
             <plugin>
                 <groupId>net.alchim31.maven</groupId>
@@ -114,6 +113,14 @@
                     <skipMain>true</skipMain> <!-- skip compile -->
                     <skip>true</skip> <!-- skip testCompile -->
                 </configuration>
+                <executions>
+                    <execution>
+                        <phase>compile</phase>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <groupId>org.antipathy</groupId>

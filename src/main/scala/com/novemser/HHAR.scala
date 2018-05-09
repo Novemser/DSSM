@@ -6,6 +6,42 @@ import com.novemser.util.{SparkManager, Timer}
 object HHAR {
   private val spark = SparkManager.getSpark
 
+  def test2(): Unit = {
+    val data = spark.read
+      .option("header", "true")
+      .option("inferSchema", true)
+      .csv("hdfs://novemser:9000/data/Phones_accelerometer_shuffle_del_10w.csv")
+      .withColumnRenamed("gt", "class")
+//      .drop("Model")
+      .filter("class != 'null'")
+
+    val nexus4 = data.filter("model = 'nexus4'").drop("model")
+    val s3Data = data.filter("model = 's3'").drop("model")
+//    val splusData = data.filter("model = 'samsungold'").drop("model")
+//    val s3miniData = data.filter("model = 's3mini'").drop("model")
+
+    val timer = new Timer()
+      .initTimer("src")
+      .initTimer("transfer")
+
+    val (srcErr, transErr) =
+      doExperiment(s3Data, nexus4, nexus4, treeType = TreeType.SER, timer = timer, maxDepth = 5, numTrees = 50)
+    timer.printTime()
+    val (tgtErr, _) =
+      doExperiment(
+        nexus4,
+        nexus4,
+        nexus4,
+        treeType = TreeType.SER,
+        timer = timer,
+        maxDepth = 10,
+        srcOnly = true,
+        numTrees = 50
+      )
+    println(s"srcErr, transErr, tgtErr $srcErr, $transErr, $tgtErr")
+
+  }
+
   /**
    * 1. 有很多nexus4手机的data,少量SamsungS+手机数据,预测迁移后的模型在所有三星手机中的预测效果
    *     - SamsungS+迁移用的数量从10-15-20-25-30-35-40-45-50
@@ -96,22 +132,23 @@ object HHAR {
   }
 
   def main(args: Array[String]): Unit = {
-    println("=============================================STRUT============")
-    test1(
-//      Array(
-//        //        ("model = 'samsungold'", "model != 'samsungold'"),
-//        //        ("model = 's3mini'", "model != 's3mini'"),
-//        //        ("model = 'nexus4'", "model != 'nexus4'"),
-//        //        ("model = 's3'", "model != 's3'")
-//        //        ("class = 'stand'", "class != 'stand'"),
-//        ("class = 'stairsdown'", "class = 'stairsup'"),
-//        ("class = 'stairsup'", "class = 'stairsdown'")
-//        //        ("class = 'walk'", "class != 'walk'")
-//      ),
-      TreeType.STRUT
-    )
-    println("=============================================Mix============")
-    test1(TreeType.MIX)
+//    println("=============================================STRUT============")
+//    test1(
+////      Array(
+////        //        ("model = 'samsungold'", "model != 'samsungold'"),
+////        //        ("model = 's3mini'", "model != 's3mini'"),
+////        //        ("model = 'nexus4'", "model != 'nexus4'"),
+////        //        ("model = 's3'", "model != 's3'")
+////        //        ("class = 'stand'", "class != 'stand'"),
+////        ("class = 'stairsdown'", "class = 'stairsup'"),
+////        ("class = 'stairsup'", "class = 'stairsdown'")
+////        //        ("class = 'walk'", "class != 'walk'")
+////      ),
+//      TreeType.STRUT
+//    )
+//    println("=============================================Mix============")
+//    test1(TreeType.MIX)
+    test2()
 
   }
 }

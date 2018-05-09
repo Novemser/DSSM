@@ -501,7 +501,6 @@ public class Ser extends SingleSourceModelTransfer implements
 				}
 
 				Instances[] subsets = treeNode.splitData(data);
-				data = null;
 				for (int i = 0; i < subsets.length; ++i) {
 					splitNodes.add(treeNode.m_Sons[i]);
 					splitInstances.add(subsets[i]);
@@ -515,6 +514,7 @@ public class Ser extends SingleSourceModelTransfer implements
 			if (m_IsLeaf)
 				return errorsForLeaf(data);
 
+			// if no data, will prune this node
 			if (Utils.eq(data.sumOfWeights(), 0.0)) {
 				m_IsLeaf = true;
 				m_IsEmpty = true;
@@ -559,8 +559,8 @@ public class Ser extends SingleSourceModelTransfer implements
 
 			// Reduce node
 			if (Utils.smOrEq(leafError, treeError)) {
+				System.out.println("leafError, treeError:" + leafError + "," + treeError);
 				if (leafError != 0.0d) {
-					System.out.println("leafError, treeError:" + leafError + "," + treeError);
 				}
 				// Free son Trees
 				m_IsLeaf = true;

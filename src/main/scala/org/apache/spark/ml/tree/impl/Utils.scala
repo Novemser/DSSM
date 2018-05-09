@@ -62,7 +62,7 @@ object Utils {
       (node.error.errorSampleCount(), node.error.totalSampleCount())
     } else {
       val left = subTreeStats(node.leftChild.get.asInstanceOf[TransferLearningNode])
-      val right = subTreeStats(node.leftChild.get.asInstanceOf[TransferLearningNode])
+      val right = subTreeStats(node.rightChild.get.asInstanceOf[TransferLearningNode])
       (left._1 + right._1, left._2 + right._2)
     }
   }

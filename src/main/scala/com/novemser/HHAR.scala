@@ -24,8 +24,20 @@ object HHAR {
       .initTimer("src")
       .initTimer("transfer")
 
-    val (srcErr, transErr) =
-      doExperiment(s3Data, nexus4, nexus4, treeType = TreeType.SER, timer = timer, maxDepth = 5, numTrees = 50)
+    val depthList = Array(5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
+    depthList.foreach(depth => {
+      val (srcErr, transErr) =
+        doExperiment(
+          s3Data,
+          nexus4,
+          nexus4,
+          treeType = TreeType.SER,
+          timer = timer,
+          maxDepth = depth,
+          numTrees = 50
+        )
+      println(s"depth=$depth,srcErr=$srcErr,transErr=$transErr")
+    })
     timer.printTime()
     val (tgtErr, _) =
       doExperiment(
@@ -38,8 +50,7 @@ object HHAR {
         srcOnly = true,
         numTrees = 50
       )
-    println(s"srcErr, transErr, tgtErr $srcErr, $transErr, $tgtErr")
-
+    println(s"tgtErr=$tgtErr")
   }
 
   /**
@@ -69,17 +80,17 @@ object HHAR {
     val splusData = data.filter("model = 'samsungold'").drop("model")
     val s3miniData = data.filter("model = 's3mini'").drop("model")
     val expMap = Map(
-//      "s3" -> s3Data,
+      "s3" -> s3Data,
       "s+" -> splusData,
-      "s3mini" -> s3miniData
-//      "nexus4" -> nexus4
+//      "s3mini" -> s3miniData
+      "nexus4" -> nexus4
     )
     nexus4.cache()
-    val sourceData = nexus4 //.randomSplit(Array(0.1, 99.9))(0)
+    val sourceData = s3miniData
     expMap.values.foreach { _.cache }
     var tE = -1.0d
 
-    Range(10, 80, 10).foreach { transferPercent =>
+    Range(1, 6, 1).foreach { transferPercent =>
       {
         expMap.foreach(kv => {
           val timer = new Timer()
@@ -92,20 +103,18 @@ object HHAR {
           transferData.cache()
           println(s"transferData count:${transferData.count()}")
           val (srcErr, transErr) =
-            doExperiment(sourceData, transferData, tgtData, treeType = treeType, timer = timer)
+            doExperiment(sourceData, transferData, tgtData, treeType = treeType, timer = timer, maxDepth = 5)
           println(s"in exp..srcErr, transErr=${(srcErr, transErr)}")
           timer.printTime()
           timer.reset()
           timer.initTimer("src")
-//          if (tE < 0) {
           val (tgtErr, _) =
             doExperiment(transferData, transferData, tgtData, treeType = treeType, srcOnly = true, timer = timer)
           tE = tgtErr
           timer.printTime()
           transferData.unpersist()
-          //          }
           println(
-            s"End experiment:${kv._1}, percent:$transferPercent whth SrcErr:$srcErr,TgtErr:$tE,TransferErr:$transErr"
+            s"End experiment:${kv._1}, percent:$tp whth SrcErr:$srcErr,TgtErr:$tE,TransferErr:$transErr"
           )
         })
       }
@@ -147,8 +156,8 @@ object HHAR {
 //      TreeType.STRUT
 //    )
 //    println("=============================================Mix============")
-//    test1(TreeType.MIX)
-    test2()
+    test1(TreeType.SER)
+//    test2()
 
   }
 }

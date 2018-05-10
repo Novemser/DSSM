@@ -1,11 +1,9 @@
 package org.apache.spark.ml.tree.impl
 
-import org.apache.spark.internal.Logging
 import org.apache.spark.ml.feature.LabeledPoint
-import org.apache.spark.ml.tree.impl.RandomForest.{NodeIndexInfo, extractMultiClassCategories, findSplitsForContinuousFeature}
-import org.apache.spark.ml.tree.impl.TransferRandomForest.{findSplits, logDebug, logInfo, logWarning}
-import org.apache.spark.ml.tree.model.ErrorStats
 import org.apache.spark.ml.tree._
+import org.apache.spark.ml.tree.impl.RandomForest.{NodeIndexInfo, extractMultiClassCategories, findSplitsForContinuousFeature}
+import org.apache.spark.ml.tree.model.ErrorStats
 import org.apache.spark.ml.util.Instrumentation
 import org.apache.spark.mllib.tree.configuration.Strategy
 import org.apache.spark.mllib.tree.impurity.ImpurityCalculator
@@ -391,7 +389,6 @@ object SERTransfer extends ModelTransfer {
     }
   }
 
-
   private[tree] def findBestSplits(input: RDD[BaggedPoint[TreePoint]],
                                    metadata: DecisionTreeMetadata,
                                    topNodesForGroup: Map[Int, LearningNode],
@@ -414,17 +411,17 @@ object SERTransfer extends ModelTransfer {
     logDebug("using nodeIdCache = " + nodeIdCache.nonEmpty.toString)
 
     /**
-      * Performs a sequential aggregation over a partition for a particular tree and node.
-      *
-      * For each feature, the aggregate sufficient statistics are updated for the relevant
-      * bins.
-      *
-      * @param treeIndex   Index of the tree that we want to perform aggregation for.
-      * @param nodeInfo    The node info for the tree node.
-      * @param agg         Array storing aggregate calculation, with a set of sufficient statistics
-      *                    for each (node, feature, bin).
-      * @param baggedPoint Data point being aggregated.
-      */
+     * Performs a sequential aggregation over a partition for a particular tree and node.
+     *
+     * For each feature, the aggregate sufficient statistics are updated for the relevant
+     * bins.
+     *
+     * @param treeIndex   Index of the tree that we want to perform aggregation for.
+     * @param nodeInfo    The node info for the tree node.
+     * @param agg         Array storing aggregate calculation, with a set of sufficient statistics
+     *                    for each (node, feature, bin).
+     * @param baggedPoint Data point being aggregated.
+     */
     def nodeBinSeqOp(treeIndex: Int,
                      nodeInfo: NodeIndexInfo,
                      agg: Array[DTStatsAggregator],
@@ -450,16 +447,16 @@ object SERTransfer extends ModelTransfer {
     }
 
     /**
-      * Performs a sequential aggregation over a partition.
-      *
-      * Each data point contributes to one node. For each feature,
-      * the aggregate sufficient statistics are updated for the relevant bins.
-      *
-      * @param agg         Array storing aggregate calculation, with a set of sufficient statistics for
-      *                    each (node, feature, bin).
-      * @param baggedPoint Data point being aggregated.
-      * @return agg
-      */
+     * Performs a sequential aggregation over a partition.
+     *
+     * Each data point contributes to one node. For each feature,
+     * the aggregate sufficient statistics are updated for the relevant bins.
+     *
+     * @param agg         Array storing aggregate calculation, with a set of sufficient statistics for
+     *                    each (node, feature, bin).
+     * @param baggedPoint Data point being aggregated.
+     * @return agg
+     */
     def binSeqOp(agg: Array[DTStatsAggregator], baggedPoint: BaggedPoint[TreePoint]): Array[DTStatsAggregator] = {
       // Iterate over all nodes in this data pass
       treeToNodeToIndexInfo.foreach {
@@ -478,11 +475,10 @@ object SERTransfer extends ModelTransfer {
     }
 
     /**
-      * Get node index in group --> features indices map,
-      * which is a short cut to find feature indices for a node given node index in group.
-      */
-    def getNodeToFeatures(treeToNodeToIndexInfo:
-                          Map[Int, Map[Int, NodeIndexInfo]]): Option[Map[Int, Array[Int]]] = {
+     * Get node index in group --> features indices map,
+     * which is a short cut to find feature indices for a node given node index in group.
+     */
+    def getNodeToFeatures(treeToNodeToIndexInfo: Map[Int, Map[Int, NodeIndexInfo]]): Option[Map[Int, Array[Int]]] = {
       if (!metadata.subsamplingFeatures) {
         None
       } else {
@@ -538,7 +534,6 @@ object SERTransfer extends ModelTransfer {
         // which can be combined with other partition using `reduceByKey`
         nodeStatsAggregators.zipWithIndex.map(_.swap).iterator
       }
-
 
     val nodeToBestSplits = partitionAggregates
       .reduceByKey((a, b) => a.merge(b))
@@ -655,8 +650,7 @@ object SERTransfer extends ModelTransfer {
   private def binsToBestSplit(binAggregates: DTStatsAggregator,
                               splits: Array[Array[Split]],
                               featuresForNode: Option[Array[Int]],
-                              node: LearningNode
-                              ): (Split, ImpurityStats, (ErrorStats, ErrorStats, ErrorStats)) = {
+                              node: LearningNode): (Split, ImpurityStats, (ErrorStats, ErrorStats, ErrorStats)) = {
 
     // Calculate InformationGain and ImpurityStats if current node is leaf node
     // for other nodes, only calculate it's error. If no data collected on this node, prune this node.
@@ -912,7 +906,7 @@ object SERTransfer extends ModelTransfer {
     // If left child or right child doesn't satisfy minimum instances per node,
     // then this split is invalid, return invalid information gain stats.
     if ((leftCount < metadata.minInstancesPerNode) ||
-      (rightCount < metadata.minInstancesPerNode)) {
+        (rightCount < metadata.minInstancesPerNode)) {
       return ImpurityStats.getInvalidImpurityStats(parentImpurityCalculator)
     }
 
@@ -940,32 +934,32 @@ object SERTransfer extends ModelTransfer {
   }
 
   /**
-    * Returns splits for decision tree calculation.
-    * Continuous and categorical features are handled differently.
-    *
-    * Continuous features:
-    * For each feature, there are numBins - 1 possible splits representing the possible binary
-    * decisions at each node in the tree.
-    * This finds locations (feature values) for splits using a subsample of the data.
-    *
-    * Categorical features:
-    * For each feature, there is 1 bin per split.
-    * Splits and bins are handled in 2 ways:
-    * (a) "unordered features"
-    * For multiclass classification with a low-arity feature
-    * (i.e., if isMulticlass && isSpaceSufficientForAllCategoricalSplits),
-    * the feature is split based on subsets of categories.
-    * (b) "ordered features"
-    * For regression and binary classification,
-    * and for multiclass classification with a high-arity feature,
-    * there is one bin per category.
-    *
-    * @param input    Training data: RDD of [[LabeledPoint]]
-    * @param metadata Learning and dataset metadata
-    * @param seed     random seed
-    * @return Splits, an Array of [[Split]]
-    *         of size (numFeatures, numSplits)
-    */
+   * Returns splits for decision tree calculation.
+   * Continuous and categorical features are handled differently.
+   *
+   * Continuous features:
+   * For each feature, there are numBins - 1 possible splits representing the possible binary
+   * decisions at each node in the tree.
+   * This finds locations (feature values) for splits using a subsample of the data.
+   *
+   * Categorical features:
+   * For each feature, there is 1 bin per split.
+   * Splits and bins are handled in 2 ways:
+   * (a) "unordered features"
+   * For multiclass classification with a low-arity feature
+   * (i.e., if isMulticlass && isSpaceSufficientForAllCategoricalSplits),
+   * the feature is split based on subsets of categories.
+   * (b) "ordered features"
+   * For regression and binary classification,
+   * and for multiclass classification with a high-arity feature,
+   * there is one bin per category.
+   *
+   * @param input    Training data: RDD of [[LabeledPoint]]
+   * @param metadata Learning and dataset metadata
+   * @param seed     random seed
+   * @return Splits, an Array of [[Split]]
+   *         of size (numFeatures, numSplits)
+   */
   protected[tree] def findSplits(input: RDD[LabeledPoint],
                                  metadata: DecisionTreeMetadata,
                                  seed: Long): Array[Array[Split]] = {
@@ -1085,15 +1079,15 @@ object SERTransfer extends ModelTransfer {
   }
 
   /**
-    * Helper for binSeqOp, for regression and for classification with only ordered features.
-    *
-    * For each feature, the sufficient statistics of one bin are updated.
-    *
-    * @param agg            Array storing aggregate calculation, with a set of sufficient statistics for
-    *                       each (feature, bin).
-    * @param treePoint      Data point being aggregated.
-    * @param instanceWeight Weight (importance) of instance in dataset.
-    */
+   * Helper for binSeqOp, for regression and for classification with only ordered features.
+   *
+   * For each feature, the sufficient statistics of one bin are updated.
+   *
+   * @param agg            Array storing aggregate calculation, with a set of sufficient statistics for
+   *                       each (feature, bin).
+   * @param treePoint      Data point being aggregated.
+   * @param instanceWeight Weight (importance) of instance in dataset.
+   */
   def orderedBinSeqOp(agg: DTStatsAggregator,
                       treePoint: TreePoint,
                       instanceWeight: Double,

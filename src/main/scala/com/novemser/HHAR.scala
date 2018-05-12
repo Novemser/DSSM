@@ -2,7 +2,12 @@ package com.novemser
 
 import com.novemser.DSSM.doExperiment
 import com.novemser.util.{SparkManager, Timer}
-
+//hello
+//胡胡胡胡
+//where r u
+//taking shower?
+//using small old huhu
+//love you 4ever
 object HHAR {
   private val spark = SparkManager.getSpark
 
@@ -17,40 +22,43 @@ object HHAR {
 
     val nexus4 = data.filter("model = 'nexus4'").drop("model")
     val s3Data = data.filter("model = 's3'").drop("model")
-//    val splusData = data.filter("model = 'samsungold'").drop("model")
-//    val s3miniData = data.filter("model = 's3mini'").drop("model")
+    val splusData = data.filter("model = 'samsungold'").drop("model")
+    val s3miniData = data.filter("model = 's3mini'").drop("model")
+    val src = nexus4
+    val tgt = splusData
 
     val timer = new Timer()
       .initTimer("src")
       .initTimer("transfer")
 
-    val depthList = Array(5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
+    val depthList = Array(10, 11, 12, 13, 14, 15)
     depthList.foreach(depth => {
       val (srcErr, transErr) =
         doExperiment(
-          s3Data,
-          nexus4,
-          nexus4,
-          treeType = TreeType.SER,
+          src,
+          tgt,
+          tgt,
+          treeType = TreeType.STRUT,
           timer = timer,
-          maxDepth = depth,
+          maxDepth = depth + 10,
           numTrees = 50
         )
       println(s"depth=$depth,srcErr=$srcErr,transErr=$transErr")
+
+      val (tgtErr, _) =
+        doExperiment(
+          tgt,
+          tgt,
+          tgt,
+          treeType = TreeType.SER,
+          timer = timer,
+          maxDepth = depth,
+          srcOnly = true,
+          numTrees = 50
+        )
+      println(s"depth=$depth,tgtErr=$tgtErr")
     })
     timer.printTime()
-    val (tgtErr, _) =
-      doExperiment(
-        nexus4,
-        nexus4,
-        nexus4,
-        treeType = TreeType.SER,
-        timer = timer,
-        maxDepth = 10,
-        srcOnly = true,
-        numTrees = 50
-      )
-    println(s"tgtErr=$tgtErr")
   }
 
   /**
@@ -66,7 +74,7 @@ object HHAR {
     val data = spark.read
       .option("header", "true")
       .option("inferSchema", true)
-      .csv("hdfs://novemser:9000/data/Phones_accelerometer.csv")
+      .csv("hdfs://novemser:9000/data/Phones_accelerometer_shuffle_del_500w.csv")
       .withColumnRenamed("gt", "class")
       //      .drop("model")
       .drop("device")
@@ -97,7 +105,7 @@ object HHAR {
             .initTimer("src")
             .initTimer("transfer")
           val tgtData = kv._2
-          val tp = transferPercent
+          val tp = transferPercent * 0.02
           println(s"Doing experiment:${kv._1}, percent:$tp")
           val Array(transferData, _) = tgtData.randomSplit(Array(tp, 100 - tp), 1)
           transferData.cache()
@@ -156,8 +164,8 @@ object HHAR {
 //      TreeType.STRUT
 //    )
 //    println("=============================================Mix============")
-    test1(TreeType.SER)
-//    test2()
+//    test1(TreeType.STRUT)
+    test2()
 
   }
 }

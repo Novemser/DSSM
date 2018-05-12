@@ -680,7 +680,7 @@ object DSSM {
 
     treeType match {
       case TreeType.SER   => rf.setImpurity("entropy")
-      case TreeType.STRUT => rf.setImpurity("entropy")
+      case TreeType.STRUT => rf.setImpurity("entropy").setMinInfoGain(0.03) // prevent over fitting
       case TreeType.MIX   => rf.setImpurity("entropy")
     }
     // Convert indexed labels back to original labels.
@@ -889,8 +889,8 @@ object DSSM {
 
 //    testStrutSimple()
 //    testStrutDigits()
-    testStrutLetter()
-//    testBug()
+//    testStrutLetter()
+    testBug()
   }
 
   def printInfo(sourceData: DataFrame, targetData: DataFrame, testData: DataFrame): Unit = {
@@ -927,8 +927,8 @@ object DSSM {
   def main(args: Array[String]): Unit = {
 //    testMIX()
 //    testNumeric()
-//    testStrut()
-//    testLetter(TreeType.MIX)
+    testStrut()
+//    testLetter(TreeType.STRUT)
 //    testWine(TreeType.MIX)
 //    testUsps(TreeType.SER)
 //    testDigits(TreeType.MIX)

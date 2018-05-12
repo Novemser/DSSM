@@ -1,7 +1,5 @@
 package org.apache.spark.ml.tree.impl
 
-import java.util.Collections
-
 import org.apache.spark.ml.feature.LabeledPoint
 import org.apache.spark.ml.tree._
 import org.apache.spark.ml.tree.impl.RandomForest.NodeIndexInfo
@@ -312,40 +310,49 @@ object STRUTTransfer extends ModelTransfer {
           }
 
           // update stats for each node
+          // Do not modify node info this place...
           val result =
             STRUTTransfer
               .updateStats(aggStats, splits, featuresForNode, nodes(nodeIndex))
           (nodeIndex, result)
       }
-      .filter { _._2.nonEmpty }
+      .filter { _._2._1.nonEmpty }
       .collectAsMap()
-
-//    nodesForGroup.foreach {
-//      case (treeIndex, nodesForTree) =>
-//        nodesForTree.foreach { node =>
-//          val nodeIndex = node.id
-//          val nodeInfo = treeToNodeToIndexInfo(treeIndex)(nodeIndex)
-//          val aggNodeIndex = nodeInfo.nodeIndexInGroup
-//          val newStatsInfoArray = nodeNewStatsMap(aggNodeIndex)
-//          nodeN
-//        }
-//    }
 
 //    println(s"nodeNewStatsMap.size:${nodeNewStatsMap.size}")
 
     // Update node split info
-    nodeNewStatsMap.foreach((tuple: (Int, Array[(Split, ImpurityStats, Double, Double)])) => {
+    nodeNewStatsMap.foreach((tuple: (Int, (Array[(Split, ImpurityStats, Double, Double)], Boolean))) => {
       val node = nodes(tuple._1).asInstanceOf[TransferLearningNode]
-      val newSplits = tuple._2.map(_._1)
-      val newStats = tuple._2.map(_._2)
-      val jsds = tuple._2.map(_._3)
-      val invertedJsds = tuple._2.map(_._4)
-      var splitIndex = 0
-      var best = Math.max(jsds(splitIndex), invertedJsds(splitIndex))
-      Range(1, jsds.length - 1).foreach { i =>
+      val second = tuple._2
+      val info = second._1
+
+      val newSplits = info.map(_._1)
+      val newStats = info.map(_._2)
+      val jsds = info.map(_._3)
+      val invertedJsds = info.map(_._4)
+      val needPruning = second._2
+      if (needPruning) {
+//        logWarning(s"no useful tree ${node.id}")
+        node.isLeaf = true
+        node.leftChild = None
+        node.rightChild = None
+      }
+      // if this node does not need to re-calculate threshold but only
+      // update data distribution info
+      val onlyRememberDataDistribution = jsds.forall(v => Utils.eq(Utils.INVALID_DG_DOUBLE, v))
+      if (onlyRememberDataDistribution) {
+        assert(newStats.length == 1)
+        assert(newSplits.length == 1)
+        node.stats = newStats.head
+        node.split = Some(newSplits.head)
+      } else {
+        var splitIndex = 0
+        var best = Math.max(jsds(splitIndex), invertedJsds(splitIndex))
+        Range(1, jsds.length - 1).foreach { i =>
         {
           if (newStats(i - 1).gain <= newStats(i).gain
-              && newStats(i + 1).gain <= newStats(i).gain) {
+            && newStats(i + 1).gain <= newStats(i).gain) {
             if (jsds(i) > best) {
               best = jsds(i)
               splitIndex = i
@@ -356,45 +363,46 @@ object STRUTTransfer extends ModelTransfer {
             }
           }
         }
-      }
+        }
 
-      if (Utils.gr(invertedJsds(splitIndex), jsds(splitIndex))) {
-//        logWarning(s"invert tree ${node.id}")
-        val tmp = node.leftChild
-        node.leftChild = node.rightChild
-        node.rightChild = tmp
+        if (Utils.gr(invertedJsds(splitIndex), jsds(splitIndex))) {
+          logInfo(s"invert tree ${node.id}")
+          val tmp = node.leftChild
+          node.leftChild = node.rightChild
+          node.rightChild = tmp
+        }
+        val selectedStats = newStats(splitIndex)
+
+        // Was there any useful split?
+        if (selectedStats.gain < metadata.minInfoGain ||
+            !selectedStats.valid ||
+           selectedStats.impurityCalculator.count == 0) {
+          logInfo(s"Strut Pruning node ${node.id}")
+          node.isLeaf = true
+          node.leftChild = None
+          node.rightChild = None
+        }
+        node.split = Some(newSplits(splitIndex))
+        node.stats = newStats(splitIndex)
       }
-//      if (newStats.isEmpty) {
-//        logWarning(s"no useful tree ${node.id}")
-//        node.isLeaf = true
-//        node.leftChild = None
-//        node.rightChild = None
-//      }
-      // Was there any useful split?
-//      if (newStats.isEmpty) {
-////        logWarning(s"node ${node.id} back to leaf")
-//        node.isLeaf = true
-//        node.leftChild = None
-//        node.rightChild = None
-//      } else {
-      node.split = Some(newSplits(splitIndex))
-      node.stats = newStats(splitIndex)
-//      }
     })
   }
 
   /**
+   * IMPORTANT: DO NOT TRY TO MODIFY NODE DIRECTLY HERE!!
+   * Since all nodes are serialized to worker nodes as a copy of the original node.
+   * Collect to driver for further processing
    *
    * @param binAggregates
    * @param splits
    * @param featuresForNode
    * @param node
-   * @return Array of split, stats, divergenceGain, invertedDivergenceGain
+   * @return Array of split, stats, divergenceGain, invertedDivergenceGain; is the node need to be pruned
    */
   private def updateStats(binAggregates: DTStatsAggregator,
                           splits: Array[Array[Split]],
                           featuresForNode: Option[Array[Int]],
-                          node: LearningNode): Array[(Split, ImpurityStats, Double, Double)] = {
+                          node: LearningNode): (Array[(Split, ImpurityStats, Double, Double)], Boolean) = {
     def calcJSD(calcUnderTest: ImpurityCalculator, origCalc: ImpurityCalculator, numClasses: Int): Double = {
       var jsp = 0.0d
       Range(0, numClasses).foreach { cls =>
@@ -508,9 +516,9 @@ object STRUTTransfer extends ModelTransfer {
           jsds(1) = calcPartJSD(newRight, newLeft, oldLeft, oldRight, numClasses)
           val divergenceGain = 1 - jsds(0)
           val invertedDivergenceGain = 1 - jsds(1)
-          //        logWarning(
-          //          s"DG1:$divergenceGain, DG2:$invertedDivergenceGain"
-          //        )
+          logDebug(
+            s"DG1:$divergenceGain, DG2:$invertedDivergenceGain"
+          )
 
           (t._1, t._2, divergenceGain, invertedDivergenceGain)
         })
@@ -519,17 +527,23 @@ object STRUTTransfer extends ModelTransfer {
       // if there's no data point reaching this node, prune the node.
       if (res.isEmpty) {
         //      println(s"res.isEmpty->continuousSplitsAndImpurityInfo:${continuousSplitsAndImpurityInfo.size}")
+        var newSplit: Split = null
+        var newStats: ImpurityStats = null
         if (thresholdUpdateInfo.nonEmpty) {
           val maxGainSplit = thresholdUpdateInfo.maxBy(_._2.gain)
-          node.split = Some(maxGainSplit._1)
-          node.stats = maxGainSplit._2
+          newSplit = maxGainSplit._1
+          newStats = maxGainSplit._2
         }
-        logInfo(s"STRUT Pruning node: ${node.id}, no data reach continuous node")
-        node.isLeaf = true
-        node.leftChild = None
-        node.rightChild = None
+        logDebug(s"STRUT need to prune node: ${node.id}, no data reach continuous node")
+
+        return (
+          Array(
+            (newSplit, newStats, Utils.INVALID_DG_DOUBLE, Utils.INVALID_DG_DOUBLE)
+          ),
+          true
+        )
       }
-      return res
+      return (res, false)
     }
 
     val updateStatsSplits = validFeatureSplits.withFilter {
@@ -682,19 +696,11 @@ object STRUTTransfer extends ModelTransfer {
     if (nonContinuousSplitAndImpurityInfo.nonEmpty) {
       // if node's feature is not continuous, only update it's statistics info
       val impurityInfo = nonContinuousSplitAndImpurityInfo.maxBy(_._2.gain)
-      // update stats info
-      node.split = Some(impurityInfo._1)
-      node.stats = impurityInfo._2
-      // if no data reach this point
-      if (!node.stats.valid || node.stats.gain < 0) {
-        // Prune this node
-        logInfo(s"STRUT Pruning node:${node.id}")
-        node.isLeaf = true
-        node.leftChild = None
-        node.rightChild = None
-      }
+      // if no data reach this point, prune
+      val needPruned = !node.stats.valid || node.stats.gain < 0
+      return (Array((impurityInfo._1, impurityInfo._2, Utils.INVALID_DG_DOUBLE, Utils.INVALID_DG_DOUBLE)), needPruned)
     }
-    Array()
+    (Array(), false)
 //    println(s"numFeaturesPerNode:${binAggregates.metadata.numFeaturesPerNode},nonContinuousSplitAndImpurityInfo:${nonContinuousSplitAndImpurityInfo.size},continuousSplits:${continuousSplitsAndImpurityInfo.size}")
 
 //    println(s"binAggregates.metadata.numFeaturesPerNode:${binAggregates.metadata.numFeaturesPerNode}" +

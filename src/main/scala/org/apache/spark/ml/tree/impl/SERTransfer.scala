@@ -146,9 +146,6 @@ object SERTransfer extends ModelTransfer {
     logInfo("Internal timing for SER expansion:")
     logInfo(s"$timer")
 
-    //    topNodes.foreach(pruneNode)
-    //    println(topNodes.head.toNode.subtreeToString())
-//    // Pruning
     nodesToTransfer.foreach(node => {
       // If the leaf error of current node is smaller than the expanded sub-tree,
       // that means that if we do not expand current node, will get better result
@@ -166,7 +163,6 @@ object SERTransfer extends ModelTransfer {
         }
       }
     })
-//    println(s"after:${trainedModels.head.rootLearningNode.toNode.subtreeToString()}")
 
     val numFeatures = metadata.numFeatures
 

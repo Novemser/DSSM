@@ -10,6 +10,7 @@ import org.apache.spark.sql.{DataFrame, Dataset, Row}
 object Utils {
   private val SMALL = 1.0E-6D
   val log2: Double = Math.log(2.0D)
+  final val INVALID_DG_DOUBLE = -1997.1122
 
   def gr(a: Double, b: Double): Boolean = (a - b) > SMALL
 

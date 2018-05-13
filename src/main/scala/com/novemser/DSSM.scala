@@ -9,7 +9,6 @@ import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.tree.impl.Utils
 import org.apache.spark.ml.{Pipeline, PipelineModel}
 import org.apache.spark.mllib.util.MLUtils
-import org.apache.spark.sql.types.{DoubleType, IntegerType, StructField, StructType}
 import org.apache.spark.sql.{DataFrame, Row}
 
 import scala.collection.mutable
@@ -516,6 +515,39 @@ object DSSM {
     )
   }
 
+  def doCrossValidateExperimentWithTest(source: DataFrame,
+                                        target: DataFrame,
+                                        test: DataFrame,
+                                        berr: Boolean = false,
+                                        numTrees: Int = 50,
+                                        treeType: TreeType.Value = TreeType.SER,
+                                        maxDepth: Int = 10,
+                                        expName: String = "",
+                                        doTransfer: Boolean = false): (Double, Double) = {
+    println(s"----------------------------------$expName--------------------------------------")
+    val expData = MLUtils.kFold(target.rdd, 20, 1)
+    val timer = new Timer()
+      .initTimer("src")
+      .initTimer("transfer")
+    source.persist()
+    target.persist()
+    val count = expData.length
+    val result = expData
+      .map { data => {
+        val train = spark.createDataFrame(data._1, target.schema)
+        doExperimentLibSVM(source, train, test, berr, numTrees, treeType, maxDepth, timer)
+      }
+      }
+      .reduce { (l, r) => // average
+        (l._1 + r._1, l._2 + r._2)
+      }
+    println(s"CV src result:${result._1 / count}, transfer result:${result._2 / count}")
+    timer.printTime()
+    println(s"--------------------------------------------------------------------------------")
+    result
+  }
+
+
   def doCrossValidateExperiment(source: DataFrame,
                                 target: DataFrame,
                                 berr: Boolean = false,
@@ -639,6 +671,70 @@ object DSSM {
     (srcErr._1, transferErr._1)
   }
 
+  def doExperimentLibSVM(source: DataFrame,
+                         target: DataFrame,
+                         test: DataFrame,
+                         berr: Boolean = false,
+                         numTrees: Int = 50,
+                         treeType: TreeType.Value = TreeType.SER,
+                         maxDepth: Int = 10,
+                         timer: Timer = new Timer,
+                         srcOnly: Boolean = false,
+                         seed: Int = 1): (Double, Double) = {
+    val rf = new SourceRandomForestClassifier()
+    rf.setFeaturesCol("features")
+      .setLabelCol("label")
+      .setMaxDepth(maxDepth)
+      .setSeed(seed)
+      .setNumTrees(numTrees)
+
+    treeType match {
+      case TreeType.SER   => rf.setImpurity("entropy")
+      case TreeType.STRUT => rf.setImpurity("entropy").setMinInfoGain(0.03) // prevent over fitting
+      case TreeType.MIX   => rf.setImpurity("entropy")
+    }
+
+    // Chain indexers and tree in a Pipeline.
+    val trainPipeline = new Pipeline()
+      .setStages(Array(rf))
+
+    val srcAcc = Utils.trainAndTest(trainPipeline, source, test, berr, timer, "src")
+    if (srcOnly) {
+      println(s"Src err:$srcAcc")
+      return srcAcc
+    }
+
+    val classifier = treeType match {
+      case TreeType.SER   => new SERClassifier(rf.model)
+      case TreeType.STRUT => new STRUTClassifier(rf.model)
+      case TreeType.MIX   => new MixClassifier(rf.model)
+    }
+
+    treeType match {
+      case TreeType.SER   => classifier.setImpurity("entropy")
+      case TreeType.STRUT => classifier.setImpurity("entropy")
+      case TreeType.MIX   => classifier.setImpurity("entropy")
+    }
+
+    classifier
+      .setFeaturesCol { "features" }
+      .setLabelCol { "label" }
+      .setMaxDepth { maxDepth }
+      .setSeed { seed }
+
+    val transferPipeline = new Pipeline()
+      .setStages(Array(classifier))
+
+    val transferAcc = Utils.trainAndTest(transferPipeline, target, test, berr, timer, "transfer")
+    println(s"SrcOnly err:$srcAcc, $treeType err:$transferAcc")
+    // Using b error mentioned in paper
+    if (!berr) {
+      (srcAcc._1, transferAcc._1)
+    } else {
+      (srcAcc._2, transferAcc._2)
+    }
+  }
+
   def doExperiment(source: DataFrame,
                    target: DataFrame,
                    test: DataFrame,
@@ -683,18 +779,13 @@ object DSSM {
       case TreeType.STRUT => rf.setImpurity("entropy").setMinInfoGain(0.03) // prevent over fitting
       case TreeType.MIX   => rf.setImpurity("entropy")
     }
-    // Convert indexed labels back to original labels.
-    val labelConverter = new IndexToString()
-      .setInputCol("prediction")
-      .setOutputCol("predictedLabel")
-      .setLabels(trainLabelIndexer.labels)
 
     val trainPipeline = new Pipeline()
-      .setStages(Array(trainLabelIndexer, trainAssembler, rf, labelConverter))
+      .setStages(Array(trainLabelIndexer, trainAssembler, rf))
 
     val srcAcc = Utils.trainAndTest(trainPipeline, source, test, berr, timer, "src")
     if (srcOnly) {
-      println(s"Src err:${srcAcc}")
+      println(s"Src err:$srcAcc")
       return srcAcc
     }
 
@@ -717,7 +808,7 @@ object DSSM {
       .setSeed { seed }
 
     val transferPipeline = new Pipeline()
-      .setStages(Array(transferLabelIndexer, transferAssembler, classifier, labelConverter))
+      .setStages(Array(transferLabelIndexer, transferAssembler, classifier))
 
     val transferAcc = Utils.trainAndTest(transferPipeline, target, test, berr, timer, "transfer")
     println(s"SrcOnly err:$srcAcc, $treeType err:$transferAcc")
@@ -901,33 +992,62 @@ object DSSM {
     )
   }
 
-//  def testUsps(treeType: TreeType.Value): Unit = {
-//    val ministData = ReadHelper
-//      .getMnistData("train-labels.idx1-ubyte", "train-images.idx3-ubyte")
-//      .slice(0, 20000)
-//    import spark.implicits._
+  def testUsps(treeType: TreeType.Value): Unit = {
+    val mnist = spark.read.format("libsvm")
+      .option("numFeatures", 784)
+      .load("/home/novemser/mnist.libsvm")
+
+    val usps = spark.read.format("libsvm")
+      .option("numFeatures", 784)
+      .load("/home/novemser/Documents/Code/DSSM/src/main/resources/usps/usps.libsvm")
+
+    val test = spark.read.format("libsvm")
+      .option("numFeatures", 784)
+      .load("/home/novemser/Documents/Code/DSSM/src/main/resources/usps/usps_test.libsvm")
+    doCrossValidateExperimentWithTest(mnist, usps, test, expName = "Usps", treeType = TreeType.STRUT)
+    // Automatically identify categorical features, and index them.
+//    val featureIndexer = new VectorIndexer()
+//      .setInputCol("features")
+//      .setOutputCol("indexedFeatures")
+//      .setMaxCategories(10)
+//      .fit(mnist)
+
+//    val Array(trainingData, testData) = mnist.randomSplit(Array(0.7, 0.3))
+//    val trainingData = usps
+//    val testData = test
+//    val dt = new DecisionTreeClassifier()
+//      .setLabelCol("label")
+//      .setFeaturesCol("features")
 //
-//    val md = ministData.map(line => { Row(line: _*) }).toSeq
-//    val sfs = Range(1, ministData.head.length + 1).map(idx => {
-//      if (idx == 785) {
-//        StructField(s"class", DoubleType, nullable = false)
-//      } else {
-//        StructField(s"col$idx", DoubleType, nullable = false)
-//      }
-//    })
-//    val schema = StructType(sfs)
-//    val df = spark.createDataFrame(
-//      spark.sparkContext.parallelize(md),
-//      schema = schema
-//    )
-//    df.printSchema()
-////    df.show(20)
-//  }
+//    // Chain indexers and tree in a Pipeline.
+//    val pipeline = new Pipeline()
+//      .setStages(Array(dt))
+//
+//    val model = pipeline.fit(trainingData)
+//
+//    // Make predictions.
+//    val predictions = model.transform(testData)
+//
+//    // Select example rows to display.
+//    predictions.select("prediction", "label", "features").show(5)
+//
+//    // Select (prediction, true label) and compute test error.
+//    val evaluator = new MulticlassClassificationEvaluator()
+//      .setLabelCol("label")
+//      .setPredictionCol("prediction")
+//      .setMetricName("accuracy")
+//    val accuracy = evaluator.evaluate(predictions)
+//    println(s"Test Error = ${(1.0 - accuracy)}")
+//
+//    val treeModel = model.stages(0).asInstanceOf[DecisionTreeClassificationModel]
+//    println(s"Learned classification tree model:\n ${treeModel.toDebugString}")
+  }
 
   def main(args: Array[String]): Unit = {
+    testUsps(null)
 //    testMIX()
 //    testNumeric()
-    testStrut()
+//    testStrut()
 //    testLetter(TreeType.STRUT)
 //    testWine(TreeType.MIX)
 //    testUsps(TreeType.SER)

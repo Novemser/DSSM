@@ -4,7 +4,7 @@ import com.novemser.util.{SparkManager, Timer}
 import org.apache.spark.ml.classification._
 import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
 import org.apache.spark.ml.feature._
-import org.apache.spark.ml.linalg.{Vector, Vectors}
+import org.apache.spark.ml.linalg.{SparseVector, Vector, Vectors}
 import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.tree.impl.Utils
 import org.apache.spark.ml.{Pipeline, PipelineModel}
@@ -274,15 +274,8 @@ object DSSM {
         (l._1 + r._1, l._2 + r._2)
       }
     println(s"CV src result:${result._1 / count}, transfer result:${result._2 / count}")
-    timerSER.printTime()
+//    timerSER.printTime()
     println(s"--------------------------------------------------------------------------------")
-
-    timerSER
-      .initTimer("srcTrain")
-      .initTimer("transferTrain")
-    timerSTRUT
-      .initTimer("srcTrain")
-      .initTimer("transferTrain")
 
 //    val indexers = mutable.ArrayBuffer[StringIndexerModel]()
 //    data.schema
@@ -426,7 +419,7 @@ object DSSM {
     println(s"Mushroom STRUT:SrcOnly err:$srcAcc, strut err:$transferAcc")
   }
 
-  def testDigits(treeType: TreeType.Value): Unit = {
+  def testDigits(treeType: TreeType.Value, depth: Int): Unit = {
     val d6 = spark.read
       .option("header", "true")
       .option("inferSchema", value = true)
@@ -438,9 +431,9 @@ object DSSM {
       .csv("/home/novemser/Documents/Code/DSSM/src/main/resources/digits/optdigits_9.csv")
 
 //    doCrossValidateExperiment(d6, d9, treeType = TreeType.SER, expName = "DigitsSER-6-9")
-    doCrossValidateExperiment(d6, d9, treeType = treeType, expName = "DigitsSER-6-9")
+    doCrossValidateExperiment(d6, d9, treeType = treeType, expName = "DigitsSER-6-9", maxDepth = depth)
 //    doCrossValidateExperiment(d9, d6, treeType = TreeType.SER, expName = "DigitsSER-9-6")
-    doCrossValidateExperiment(d9, d6, treeType = treeType, expName = "DigitsSER-9-6")
+    doCrossValidateExperiment(d9, d6, treeType = treeType, expName = "DigitsSER-9-6", maxDepth = depth)
   }
 
   def testLandMine(treeType: TreeType.Value): Unit = {
@@ -479,7 +472,7 @@ object DSSM {
     println(s"src err:${res._1 / 14}, $treeType err:${res._2 / 14}")
   }
 
-  def testLetter(treeType: TreeType.Value): Unit = {
+  def testLetter(treeType: TreeType.Value, depth: Int): Unit = {
     val data = spark.read
       .option("header", "true")
       .option("inferSchema", true)
@@ -504,14 +497,16 @@ object DSSM {
       x2barLEMean,
       x2barGMean,
       expName = "LetterSTRUT-x2bar<=mean-x2bar>mean",
-      treeType = treeType
+      treeType = treeType,
+      maxDepth = depth
     )
 //    doCrossValidateExperiment(x2barGMean, x2barLEMean, expName = "LetterSER-x2bar>mean-x2bar<=mean", treeType = TreeType.SER)
     doCrossValidateExperiment(
       x2barGMean,
       x2barLEMean,
       expName = "LetterSTRUT-x2bar>mean-x2bar<=mean",
-      treeType = treeType
+      treeType = treeType,
+      maxDepth = depth
     )
   }
 
@@ -690,7 +685,7 @@ object DSSM {
 
     treeType match {
       case TreeType.SER   => rf.setImpurity("entropy")
-      case TreeType.STRUT => rf.setImpurity("entropy").setMinInfoGain(0.03) // prevent over fitting
+      case TreeType.STRUT => rf.setImpurity("entropy")//.setMinInfoGain(0.03) // prevent over fitting
       case TreeType.MIX   => rf.setImpurity("entropy")
     }
 
@@ -1004,7 +999,28 @@ object DSSM {
     val test = spark.read.format("libsvm")
       .option("numFeatures", 784)
       .load("/home/novemser/Documents/Code/DSSM/src/main/resources/usps/usps_test.libsvm")
-    doCrossValidateExperimentWithTest(mnist, usps, test, expName = "Usps", treeType = TreeType.STRUT)
+    doCrossValidateExperimentWithTest(
+      mnist,
+      usps,
+      test,
+      expName = "Usps SER",
+      treeType = TreeType.SER
+    )
+    doCrossValidateExperimentWithTest(
+      mnist,
+      usps,
+      test,
+      expName = "Usps STRUT",
+      treeType = TreeType.STRUT
+    )
+    doCrossValidateExperimentWithTest(
+      mnist,
+      usps,
+      test,
+      expName = "Usps MIX",
+      treeType = TreeType.MIX
+    )
+
     // Automatically identify categorical features, and index them.
 //    val featureIndexer = new VectorIndexer()
 //      .setInputCol("features")
@@ -1043,17 +1059,79 @@ object DSSM {
 //    println(s"Learned classification tree model:\n ${treeModel.toDebugString}")
   }
 
+  def testInversion(treeType: TreeType.Value): Unit = {
+    val src = spark.read.format("libsvm")
+      .option("numFeatures", 784)
+      .load("/home/novemser/Documents/Code/DSSM/src/main/resources/inversion/inversion_source.libsvm")
+
+    val tgt = spark.read.format("libsvm")
+      .option("numFeatures", 784)
+      .load("/home/novemser/Documents/Code/DSSM/src/main/resources/inversion/inversion_target.libsvm")
+//      .randomSplit(Array(0.1, 0.9), 123)(0)
+
+    val test = spark.read.format("libsvm")
+      .option("numFeatures", 784)
+      .load("/home/novemser/Documents/Code/DSSM/src/main/resources/inversion/inversion_test.libsvm")
+
+    val timer = new Timer()
+      .initTimer("src")
+      .initTimer("transfer")
+
+    doExperimentLibSVM(src, tgt, test, treeType = treeType, timer = timer, maxDepth = 5)
+    doExperimentLibSVM(src, tgt, test, treeType = treeType, timer = timer, maxDepth = 10)
+    doExperimentLibSVM(src, tgt, test, treeType = treeType, timer = timer, maxDepth = 15)
+    //    doExperimentLibSVM(tgt, tgt, test, treeType = treeType, timer = timer, maxDepth = 10, srcOnly = true)
+  }
+
+  def testLowRes(treeType: TreeType.Value): Unit = {
+    val src = spark.read.format("libsvm")
+      .option("numFeatures", 784)
+      .load("/home/novemser/Documents/Code/DSSM/src/main/resources/low_res/lowres_source.libsvm")
+
+    val tgt = spark.read.format("libsvm")
+      .option("numFeatures", 784)
+      .load("/home/novemser/Documents/Code/DSSM/src/main/resources/low_res/lowres_target.libsvm")
+    //      .randomSplit(Array(0.1, 0.9), 123)(0)
+
+    val test = spark.read.format("libsvm")
+      .option("numFeatures", 784)
+      .load("/home/novemser/Documents/Code/DSSM/src/main/resources/low_res/lowres_test.libsvm")
+
+    val timer = new Timer()
+      .initTimer("src")
+      .initTimer("transfer")
+
+    doExperimentLibSVM(src, tgt, test, treeType = treeType, timer = timer, maxDepth = 5)
+    doExperimentLibSVM(src, tgt, test, treeType = treeType, timer = timer, maxDepth = 10)
+    doExperimentLibSVM(src, tgt, test, treeType = treeType, timer = timer, maxDepth = 15)
+    //    doExperimentLibSVM(tgt, tgt, test, treeType = treeType, timer = timer, maxDepth = 10, srcOnly = true)
+  }
+
+
+  //  def testHighRes()
+
   def main(args: Array[String]): Unit = {
-    testUsps(null)
+//    testUsps(null)
+//    testLowRes(TreeType.SER)
+//    testInversion(TreeType.SER)
+//    testInversion(TreeType.STRUT)
+//    testInversion(TreeType.MIX)
 //    testMIX()
 //    testNumeric()
 //    testStrut()
-//    testLetter(TreeType.STRUT)
-//    testWine(TreeType.MIX)
+//    testLetter(TreeType.MIX, 5)
+//    testLetter(TreeType.MIX, 10)
+    testWine(TreeType.SER)
+    testWine(TreeType.STRUT)
+    testWine(TreeType.MIX)
 //    testUsps(TreeType.SER)
-//    testDigits(TreeType.MIX)
+//    testDigits(TreeType.SER, 10)
+//    testDigits(TreeType.STRUT, 10)
+//    testDigits(TreeType.MIX, 10)
+//    testLandMine(TreeType.SER)
+//    testLandMine(TreeType.STRUT)
 //    testLandMine(TreeType.MIX)
-//    testMushroom(TreeType.MIX)
+//    testMushroom(TreeType.STRUT)
 //    testMushroom2()
     //    pipeline()
     //    testDT()

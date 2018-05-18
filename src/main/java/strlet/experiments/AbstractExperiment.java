@@ -129,7 +129,7 @@ public abstract class AbstractExperiment {
 		// SingleSourceTransfer[] models = { feda };
 		// SingleSourceTransfer[] models = {cs};
 //		SingleSourceTransfer[] models = { src, tgt, strut, ser, mix, cs, feda, svm };
-		SingleSourceTransfer[] models = { strut };
+		SingleSourceTransfer[] models = { ser };
 
 		runExperiment(models);
 

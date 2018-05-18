@@ -7,7 +7,7 @@ object SparkManager {
   private val conf = new SparkConf()
     .setAppName("Transfer learning")
     .set("spark.executor.memory", "7g")
-    .set("spark.driver.memory", "14g")
+//    .set("spark.driver.memory", "14g")
 //    .setMaster("spark://192.168.1.8:7077")
     .setMaster("local[*]")
 

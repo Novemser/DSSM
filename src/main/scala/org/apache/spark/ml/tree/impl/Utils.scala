@@ -44,7 +44,8 @@ object Utils {
    * @param predict prediction
    */
   def calcClassificationError(stats: Array[Double], predict: Double): ClassificationError = {
-    val predictCount = stats(predict.toInt)
+    val predictInt = predict.toInt
+    val predictCount = if (stats.length > predictInt) stats(predictInt) else 0
     ClassificationError(predictCount, stats.sum)
   }
 

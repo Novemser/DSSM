@@ -645,7 +645,7 @@ object DSSM {
                    berr: Boolean = false,
                    numTrees: Int = 50,
                    treeType: TreeType.Value = TreeType.SER,
-                   maxDepth: Int = 10,
+                   maxDepth: Int = 5,
                    timer: Timer = new Timer,
                    srcOnly: Boolean = false,
                    seed: Int = 1): (Double, Double) = {

@@ -1,9 +1,12 @@
 package com.novemser;
 
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVPrinter;
 import weka.core.Instance;
 import weka.core.Instances;
 
 import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
@@ -27,10 +30,19 @@ public class ReadHelper {
   public static void main(String[] args) throws IOException {
     double[][] data = ReadHelper.getMnistData("train-labels.idx1-ubyte",
         "train-images.idx3-ubyte");
+    CSVPrinter printer = new CSVPrinter(new FileWriter("/home/novemser/mnist.csv"),
+        CSVFormat.DEFAULT);
+
     System.out.println(data.length);
+    System.out.println(data[0].length - 1);
     for (double[] line : data) {
-      System.out.println(Arrays.toString(line));
+      for (double v : line) {
+        printer.print(v);
+      }
+      printer.println();
+//      System.out.println(Arrays.toString(line));
     }
+    printer.close();
   }
 
   public static double[][] getMnistData(String labels, String images)

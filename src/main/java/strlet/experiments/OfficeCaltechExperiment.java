@@ -12,6 +12,7 @@ import weka.core.Attribute;
 import weka.core.FastVector;
 import weka.core.Instance;
 import weka.core.Instances;
+import weka.core.converters.CSVSaver;
 
 public class OfficeCaltechExperiment extends AbstractExperiment {
 
@@ -28,6 +29,14 @@ public class OfficeCaltechExperiment extends AbstractExperiment {
 			dataDomains[i] = loadData(zip, domains[i]);
 		}
 		zip.close();
+
+		CSVSaver saver = new CSVSaver();
+		for (int i = 1; i <= 4; i++) {
+			saver.setFile(new File("/home/novemser/office_caltech_" + i + ".csv"));
+			saver.setInstances(dataDomains[i - 1]);
+			saver.writeBatch();
+		}
+		if (true) return;
 
 		for (int i = 0; i < 2; ++i) {
 			for (int j = 0; j < 4; ++j) {

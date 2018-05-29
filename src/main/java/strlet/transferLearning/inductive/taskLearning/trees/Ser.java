@@ -559,7 +559,7 @@ public class Ser extends SingleSourceModelTransfer implements
 
 			// Reduce node
 			if (Utils.smOrEq(leafError, treeError)) {
-				System.out.println("leafError, treeError:" + leafError + "," + treeError);
+//				System.out.println("leafError, treeError:" + leafError + "," + treeError);
 				if (leafError != 0.0d) {
 				}
 				// Free son Trees

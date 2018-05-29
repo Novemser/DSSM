@@ -78,23 +78,25 @@ public class LetterExperiment extends AbstractExperiment {
 	private double runExperiment(SingleSourceTransfer classifier,
 			Instances source, Instances target) throws Exception {
 
-		target = new Instances(target);
-		Instances train = target;
-		Instances test = new Instances(target);
-		SingleSourceTransfer dup = classifier.makeDuplicate();
-		dup.buildModel(source, source);
-		return err(dup, test);
 //		target = new Instances(target);
-//		target.stratify(20);
-//		double total = 0;
-//		for (int i = 0; i < 20; ++i) {
-//			Instances train = target.testCV(20, i);
-//			Instances test = target.trainCV(20, i);
-//			SingleSourceTransfer dup = classifier.makeDuplicate();
-//			dup.buildModel(source, train);
-//			total += err(dup, test);
-//		}
-//		return total / 20;
+//		Instances train = target;
+//		Instances test = new Instances(target);
+//		SingleSourceTransfer dup = classifier.makeDuplicate();
+//		dup.buildModel(source, source);
+//		return err(dup, test);
+		target = new Instances(target);
+		System.out.println("Target total:" + target.numInstances());
+		target.stratify(20);
+		double total = 0;
+		for (int i = 0; i < 20; ++i) {
+			Instances train = target.testCV(20, i);
+			Instances test = target.trainCV(20, i);
+			System.out.println("Train num:" + train.numInstances() + ",. Test num:" + test.numInstances());
+			SingleSourceTransfer dup = classifier.makeDuplicate();
+			dup.buildModel(source, train);
+			total += err(dup, test);
+		}
+		return total / 20;
 
 	}
 

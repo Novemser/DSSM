@@ -96,7 +96,7 @@ object HHAR {
 //    nexus4.cache()
 //    expMap.values.foreach { _.cache }
     val transferPercentLst = Array(0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1, 1.5)
-    val srcPercentList = Array(0.1, 0.2, 1, 5, 10, 20, 40, 50, 60)
+    val srcPercentList = Array(10, 20, 40, 50, 60, 0.1, 0.2, 1, 5)
     val tgtMap = scala.collection.mutable.HashMap[(String, Double), Double]()
 //    val srcPercentList = Array(0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1)
 
@@ -116,7 +116,7 @@ object HHAR {
               val tp = transferPercent //* 0.1
 //            println(s"Doing experiment:${kv._1}, percent:$tp")
               val Array(td, _) = tgtData.randomSplit(Array(tp, 100 - tp), 1)
-              val transferData = td//.repartition(64)
+              val transferData = td //.repartition(64)
               transferData.persist()
 //              println(s"transferData count:${transferData.count()}")
               val maxDep = treeType match {

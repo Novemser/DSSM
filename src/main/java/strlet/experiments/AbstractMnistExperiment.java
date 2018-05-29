@@ -1,5 +1,12 @@
 package strlet.experiments;
 
+import strlet.transferLearning.inductive.SingleSourceTransfer;
+import weka.core.Attribute;
+import weka.core.FastVector;
+import weka.core.Instance;
+import weka.core.Instances;
+import weka.core.converters.CSVSaver;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -7,17 +14,11 @@ import java.util.Enumeration;
 import java.util.Random;
 import java.util.zip.ZipFile;
 
-import strlet.transferLearning.inductive.SingleSourceTransfer;
-import weka.core.Attribute;
-import weka.core.FastVector;
-import weka.core.Instance;
-import weka.core.Instances;
-
 public abstract class AbstractMnistExperiment extends AbstractExperiment {
 
-	private static final int ITERATIONS = 100;
+	private static final int ITERATIONS = 1;
 	private static final int SOURCE_SIZE = 200;
-	private static final int TARGET_SIZE = 10;
+	private static final int TARGET_SIZE = 20;
 
 	protected static Instances train = null;
 	protected static Instances test = null;
@@ -30,7 +31,11 @@ public abstract class AbstractMnistExperiment extends AbstractExperiment {
 		train = getData("train-labels.idx1-ubyte", "train-images.idx3-ubyte");
 		train.randomize(new Random(1));
 		test = getData("t10k-labels.idx1-ubyte", "t10k-images.idx3-ubyte");
-
+//		CSVSaver saver = new CSVSaver();
+//		saver.setFile(new File("/home/novemser/inversion_train.csv"));
+//		saver.setInstances(train);
+//		saver.writeBatch();
+//		System.exit(0);
 	}
 
 	private static Instances getData(String labels, String images)
@@ -150,7 +155,16 @@ public abstract class AbstractMnistExperiment extends AbstractExperiment {
 			}
 
 			for (int i = 0; i < totals.length; ++i) {
-				totals[i] += runExperiment(classifiers[i], source, target);
+				CSVSaver saver = new CSVSaver();
+//				saver.setFile(new File("/home/novemser/Documents/Code/DSSM/src/main/resources/inversion/inversion_source.csv"));
+//				saver.setInstances(source);
+//				saver.writeBatch();
+				saver.setFile(new File("/home/novemser/Documents/Code/DSSM/src/main/resources/low_res/lowres_target.csv"));
+				saver.setInstances(target);
+				saver.writeBatch();
+
+				System.out.println(i + "----sNI:" + source.numInstances() + ";tNI:" + target.numInstances());
+//				totals[i] += runExperiment(classifiers[i], source, target);
 			}
 		}
 		for (int i = 0; i < totals.length; ++i) {

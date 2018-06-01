@@ -1,5 +1,8 @@
 package com.novemser
 
+import java.io.File
+
+import com.github.tototoshi.csv.CSVWriter
 import com.novemser.DSSM.doExperiment
 import com.novemser.util.{SparkManager, Timer}
 //hello
@@ -15,7 +18,7 @@ object HHAR {
     val data = spark.read
       .option("header", "true")
       .option("inferSchema", true)
-      .csv("hdfs://novemser:9000/data/Phones_accelerometer_shuffle_del_100w.csv")
+      .csv("hdfs://novemser:9000/data/Phones_accelerometer_shuffle_del_10w.csv")
       .withColumnRenamed("gt", "class")
 //      .drop("Model")
       .filter("class != 'null'")
@@ -30,35 +33,60 @@ object HHAR {
     val timer = new Timer()
       .initTimer("src")
       .initTimer("transfer")
-
-    val depthList = Array(10, 11, 12, 13, 14, 15)
+    val writer = CSVWriter.open(new File("/home/novemser/ohhehe.csv"))
+    val depthList = Array(5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 20, 25, 30)
     depthList.foreach(depth => {
-      val (srcErr, transErr) =
+      var timer = new Timer()
+        .initTimer("src")
+        .initTimer("transfer")
+//      val (srcErr, transErr) =
+//        doExperiment(
+//          src,
+//          tgt,
+//          tgt,
+//          treeType = TreeType.STRUT,
+//          timer = timer,
+//          maxDepth = depth,
+//          numTrees = 50
+//        )
+//      println(s"STRUT depth=$depth,transErr=$transErr")
+//      timer.printTime()
+//      writer.writeRow(List("D-STRUT", depth, transErr, timer.getTime("transfer")))
+      timer = new Timer()
+        .initTimer("src")
+        .initTimer("transfer")
+      val (_, tgtErr) =
         doExperiment(
           src,
-          tgt,
-          tgt,
-          treeType = TreeType.STRUT,
-          timer = timer,
-          maxDepth = depth + 10,
-          numTrees = 50
-        )
-      println(s"depth=$depth,srcErr=$srcErr,transErr=$transErr")
-
-      val (tgtErr, _) =
-        doExperiment(
-          tgt,
           tgt,
           tgt,
           treeType = TreeType.SER,
           timer = timer,
           maxDepth = depth,
-          srcOnly = true,
-          numTrees = 10
+          numTrees = 50
         )
-      println(s"depth=$depth,tgtErr=$tgtErr")
+      writer.writeRow(List("D-SER", depth, tgtErr, timer.getTime("transfer")))
+      println(s"SER depth=$depth,transErr=$tgtErr")
+      timer.printTime()
+      timer = new Timer()
+        .initTimer("src")
+        .initTimer("transfer")
+      val (_, mix) =
+        doExperiment(
+          src,
+          tgt,
+          tgt,
+          treeType = TreeType.MIX,
+          timer = timer,
+          maxDepth = depth,
+          numTrees = 50
+        )
+      println(s"MIX depth=$depth,transErr=$mix")
+      writer.writeRow(List("D-MIX", depth, mix, timer.getTime("transfer")))
+      timer.printTime()
+      writer.flush()
     })
-    timer.printTime()
+    writer.close()
   }
 
   /**
@@ -96,7 +124,7 @@ object HHAR {
 //    nexus4.cache()
 //    expMap.values.foreach { _.cache }
     val transferPercentLst = Array(0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1, 1.5)
-    val srcPercentList = Array(10, 20, 40, 50, 60, 0.1, 0.2, 1, 5)
+    val srcPercentList = Array(40, 50, 60, 0.1, 0.2, 1, 5, 10, 20)
     val tgtMap = scala.collection.mutable.HashMap[(String, Double), Double]()
 //    val srcPercentList = Array(0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1)
 
@@ -122,7 +150,7 @@ object HHAR {
               val maxDep = treeType match {
                 case TreeType.SER   => 5
                 case TreeType.MIX   => 10
-                case TreeType.STRUT => 15
+                case TreeType.STRUT => 10
               }
               val (srcErr, transErr) =
                 doExperiment(sourceData, transferData, tgtData, treeType = treeType, timer = timer, maxDepth = maxDep)
@@ -278,11 +306,11 @@ object HHAR {
 //    )
 //    println("=============================================Mix============")
 //    test1(TreeType.SER)
-    test1(TreeType.STRUT)
-    test1(TreeType.MIX)
+//    test1(TreeType.STRUT)
+//    test1(TreeType.MIX)
 //    test3(TreeType.SER)
 //    test3(TreeType.STRUT)
 //    test3(TreeType.MIX)
-    //    test2()
+    test2()
   }
 }

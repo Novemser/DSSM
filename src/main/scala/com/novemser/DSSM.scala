@@ -134,84 +134,6 @@ object DSSM {
       }
   }
 
-  def testDT(): Unit = {
-    val data = spark.read
-      .format("libsvm")
-      .load("/home/novemser/Documents/Code/spark/data/mllib/sample_libsvm_data.txt")
-
-    //    val training = spark.createDataFrame(Seq(
-    //      (0L, "a b c d e spark", 1.0),
-    //      (1L, "b d", 0.0),
-    //      (2L, "spark c f g", 1.0),
-    //      (3L, "hadoop mapreduce", 0.0)
-    //    )).toDF("id", "text", "label")
-    // Index labels, adding metadata to the label column.
-    // Fit on whole dataset to include all labels in index.
-    val labelIndexer = new StringIndexer()
-      .setInputCol("label")
-      .setOutputCol("indexedLabel")
-      .fit(data)
-
-    // Automatically identify categorical features, and index them.
-    val featureIndexer = new VectorIndexer()
-      .setInputCol("features")
-      .setOutputCol("indexedFeatures")
-      .setMaxCategories(4) // features with > 4 distinct values are treated as continuous.
-      .fit(data)
-    // Split the data into training and test sets (30% held out for testing).
-    val Array(trainingData, testData) = data.randomSplit(Array(0.7, 0.3))
-
-    // Configure an ML pipeline, which consists of three stages: tokenizer, hashingTF, and lr.
-    //    val tokenizer = new Tokenizer()
-    //      .setInputCol("text")
-    //      .setOutputCol("words")
-    //    val hashingTF = new HashingTF()
-    //      .setNumFeatures(1000)
-    //      .setInputCol(tokenizer.getOutputCol)
-    //      .setOutputCol("features")
-    val dt = new CustomDecisionTreeClassifier()
-      .setLabelCol("indexedLabel")
-      .setFeaturesCol("indexedFeatures")
-    // Convert indexed labels back to original labels.
-    val labelConverter = new IndexToString()
-      .setInputCol("prediction")
-      .setOutputCol("predictedLabel")
-      .setLabels(labelIndexer.labels)
-
-    //    val pipeline = new Pipeline()
-    //      .setStages(Array(tokenizer, hashingTF, dt))
-    // Chain indexers and tree in a Pipeline.
-    val pipeline = new Pipeline()
-      .setStages(Array(labelIndexer, featureIndexer, dt, labelConverter))
-
-    //    val model = pipeline.fit(data)
-    //    val test = spark.createDataFrame(Seq(
-    //      (4L, "spark i j k"),
-    //      (5L, "l m n"),
-    //      (6L, "spark hadoop spark"),
-    //      (7L, "apache hadoop")
-    //    )).toDF("id", "text")
-    // Train model. This also runs the indexers.
-    val model = pipeline.fit(trainingData)
-
-    // Make predictions.
-    val predictions = model.transform(testData)
-    // Select example rows to display.
-    predictions.select("predictedLabel", "label", "features").show(5)
-
-    // Select (prediction, true label) and compute test error.
-    val evaluator = new MulticlassClassificationEvaluator()
-      .setLabelCol("indexedLabel")
-      .setPredictionCol("prediction")
-      .setMetricName("accuracy")
-    val accuracy = evaluator.evaluate(predictions)
-    println(s"Test Error = ${1.0 - accuracy}")
-
-    val treeModel = model.stages(2).asInstanceOf[DecisionTreeClassificationModel]
-    println(s"Learned classification tree model:\n ${treeModel.toDebugString}")
-
-  }
-
   def testWine(treeType: TreeType.Value): Unit = {
     val red = spark.read
       .option("header", "true")
@@ -528,10 +450,11 @@ object DSSM {
     target.persist()
     val count = expData.length
     val result = expData
-      .map { data => {
-        val train = spark.createDataFrame(data._1, target.schema)
-        doExperimentLibSVM(source, train, test, berr, numTrees, treeType, maxDepth, timer)
-      }
+      .map { data =>
+        {
+          val train = spark.createDataFrame(data._1, target.schema)
+          doExperimentLibSVM(source, train, test, berr, numTrees, treeType, maxDepth, timer)
+        }
       }
       .reduce { (l, r) => // average
         (l._1 + r._1, l._2 + r._2)
@@ -541,7 +464,6 @@ object DSSM {
     println(s"--------------------------------------------------------------------------------")
     result
   }
-
 
   def doCrossValidateExperiment(source: DataFrame,
                                 target: DataFrame,
@@ -685,7 +607,7 @@ object DSSM {
 
     treeType match {
       case TreeType.SER   => rf.setImpurity("entropy")
-      case TreeType.STRUT => rf.setImpurity("entropy")//.setMinInfoGain(0.03) // prevent over fitting
+      case TreeType.STRUT => rf.setImpurity("entropy") //.setMinInfoGain(0.03) // prevent over fitting
       case TreeType.MIX   => rf.setImpurity("entropy")
     }
 
@@ -736,7 +658,7 @@ object DSSM {
                    berr: Boolean = false,
                    numTrees: Int = 50,
                    treeType: TreeType.Value = TreeType.SER,
-                   maxDepth: Int = 10,
+                   maxDepth: Int = 5,
                    timer: Timer = new Timer,
                    srcOnly: Boolean = false,
                    seed: Int = 1): (Double, Double) = {
@@ -988,15 +910,18 @@ object DSSM {
   }
 
   def testUsps(treeType: TreeType.Value): Unit = {
-    val mnist = spark.read.format("libsvm")
+    val mnist = spark.read
+      .format("libsvm")
       .option("numFeatures", 784)
       .load("/home/novemser/mnist.libsvm")
 
-    val usps = spark.read.format("libsvm")
+    val usps = spark.read
+      .format("libsvm")
       .option("numFeatures", 784)
       .load("/home/novemser/Documents/Code/DSSM/src/main/resources/usps/usps.libsvm")
 
-    val test = spark.read.format("libsvm")
+    val test = spark.read
+      .format("libsvm")
       .option("numFeatures", 784)
       .load("/home/novemser/Documents/Code/DSSM/src/main/resources/usps/usps_test.libsvm")
     doCrossValidateExperimentWithTest(
@@ -1060,16 +985,19 @@ object DSSM {
   }
 
   def testInversion(treeType: TreeType.Value): Unit = {
-    val src = spark.read.format("libsvm")
+    val src = spark.read
+      .format("libsvm")
       .option("numFeatures", 784)
       .load("/home/novemser/Documents/Code/DSSM/src/main/resources/inversion/inversion_source.libsvm")
 
-    val tgt = spark.read.format("libsvm")
+    val tgt = spark.read
+      .format("libsvm")
       .option("numFeatures", 784)
       .load("/home/novemser/Documents/Code/DSSM/src/main/resources/inversion/inversion_target.libsvm")
 //      .randomSplit(Array(0.1, 0.9), 123)(0)
 
-    val test = spark.read.format("libsvm")
+    val test = spark.read
+      .format("libsvm")
       .option("numFeatures", 784)
       .load("/home/novemser/Documents/Code/DSSM/src/main/resources/inversion/inversion_test.libsvm")
 
@@ -1084,16 +1012,19 @@ object DSSM {
   }
 
   def testLowRes(treeType: TreeType.Value): Unit = {
-    val src = spark.read.format("libsvm")
+    val src = spark.read
+      .format("libsvm")
       .option("numFeatures", 784)
       .load("/home/novemser/Documents/Code/DSSM/src/main/resources/low_res/lowres_source.libsvm")
 
-    val tgt = spark.read.format("libsvm")
+    val tgt = spark.read
+      .format("libsvm")
       .option("numFeatures", 784)
       .load("/home/novemser/Documents/Code/DSSM/src/main/resources/low_res/lowres_target.libsvm")
     //      .randomSplit(Array(0.1, 0.9), 123)(0)
 
-    val test = spark.read.format("libsvm")
+    val test = spark.read
+      .format("libsvm")
       .option("numFeatures", 784)
       .load("/home/novemser/Documents/Code/DSSM/src/main/resources/low_res/lowres_test.libsvm")
 

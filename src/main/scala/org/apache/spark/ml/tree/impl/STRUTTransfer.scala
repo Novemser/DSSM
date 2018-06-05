@@ -350,19 +350,19 @@ object STRUTTransfer extends ModelTransfer {
         var splitIndex = 0
         var best = Math.max(jsds(splitIndex), invertedJsds(splitIndex))
         Range(1, jsds.length - 1).foreach { i =>
-        {
-          if (newStats(i - 1).gain <= newStats(i).gain
-            && newStats(i + 1).gain <= newStats(i).gain) {
-            if (jsds(i) > best) {
-              best = jsds(i)
-              splitIndex = i
-            }
-            if (invertedJsds(i) > best) {
-              best = invertedJsds(i)
-              splitIndex = i
+          {
+            if (newStats(i - 1).gain <= newStats(i).gain
+                && newStats(i + 1).gain <= newStats(i).gain) {
+              if (jsds(i) > best) {
+                best = jsds(i)
+                splitIndex = i
+              }
+              if (invertedJsds(i) > best) {
+                best = invertedJsds(i)
+                splitIndex = i
+              }
             }
           }
-        }
         }
 
         if (Utils.gr(invertedJsds(splitIndex), jsds(splitIndex))) {
@@ -376,7 +376,7 @@ object STRUTTransfer extends ModelTransfer {
         // Was there any useful split?
         if (selectedStats.gain < metadata.minInfoGain ||
             !selectedStats.valid ||
-           selectedStats.impurityCalculator.count == 0) {
+            selectedStats.impurityCalculator.count == 0) {
           logInfo(s"Strut Pruning node ${node.id}")
           node.isLeaf = true
           node.leftChild = None

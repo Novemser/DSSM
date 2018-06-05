@@ -24,6 +24,10 @@ class Timer {
     result
   }
 
+  def getTime(str: String): Long = {
+    timerMap(str)
+  }
+
   def printTime(): Unit = {
     timerMap foreach { kv =>
       {

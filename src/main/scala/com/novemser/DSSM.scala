@@ -1107,10 +1107,62 @@ object DSSM {
     //    doExperimentLibSVM(tgt, tgt, test, treeType = treeType, timer = timer, maxDepth = 10, srcOnly = true)
   }
 
+  def testOffice(treeType: TreeType.Value): Unit = {
+    val domains: Array[String] = Array("amazon", "Caltech10", "dslr", "webcam")
+    val dataList = mutable.ArrayBuffer[DataFrame]()
+//    val dataMap = mutable.Map[String, DataFrame]()
+    Range(0, 4).foreach(i => {
+      val data = spark.read
+        .option("header", "true")
+        .option("inferSchema", value = true)
+        .csv(s"src/main/resources/office_caltech/office_caltech_${i + 1}.csv")
+      dataList += data
+    })
+
+    val timer = new Timer()
+      .initTimer("src")
+      .initTimer("transfer")
+
+    for (i <- 0 to 1) {
+      for (j <- 0 to 3) {
+        if (i != j) {
+          doCrossValidateExperiment(
+            dataList(i),
+            dataList(j),
+            treeType = treeType,
+            berr =  false,
+            expName = s"$treeType ${domains(i)}->${domains(j)} depth 5",
+            maxDepth = 5
+          )
+          doCrossValidateExperiment(
+            dataList(i),
+            dataList(j),
+            treeType = treeType,
+            berr =  false,
+            expName = s"$treeType ${domains(i)}->${domains(j)} depth 10",
+            maxDepth = 10
+          )
+          doCrossValidateExperiment(
+            dataList(i),
+            dataList(j),
+            treeType = treeType,
+            berr =  false,
+            expName = s"$treeType ${domains(i)}->${domains(j)} depth 15",
+            maxDepth = 15
+          )
+        }
+
+      }
+    }
+  }
+
 
   //  def testHighRes()
 
   def main(args: Array[String]): Unit = {
+    testOffice(TreeType.SER)
+    testOffice(TreeType.STRUT)
+    testOffice(TreeType.MIX)
 //    testUsps(null)
 //    testLowRes(TreeType.SER)
 //    testInversion(TreeType.SER)
@@ -1121,9 +1173,9 @@ object DSSM {
 //    testStrut()
 //    testLetter(TreeType.MIX, 5)
 //    testLetter(TreeType.MIX, 10)
-    testWine(TreeType.SER)
-    testWine(TreeType.STRUT)
-    testWine(TreeType.MIX)
+//    testWine(TreeType.SER)
+//    testWine(TreeType.STRUT)
+//    testWine(TreeType.MIX)
 //    testUsps(TreeType.SER)
 //    testDigits(TreeType.SER, 10)
 //    testDigits(TreeType.STRUT, 10)

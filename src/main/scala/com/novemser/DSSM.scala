@@ -1011,31 +1011,39 @@ object DSSM {
     //    doExperimentLibSVM(tgt, tgt, test, treeType = treeType, timer = timer, maxDepth = 10, srcOnly = true)
   }
 
-  def testLowRes(treeType: TreeType.Value): Unit = {
-    val src = spark.read
-      .format("libsvm")
-      .option("numFeatures", 784)
-      .load("/home/novemser/Documents/Code/DSSM/src/main/resources/low_res/lowres_source.libsvm")
-
-    val tgt = spark.read
-      .format("libsvm")
-      .option("numFeatures", 784)
-      .load("/home/novemser/Documents/Code/DSSM/src/main/resources/low_res/lowres_target.libsvm")
-    //      .randomSplit(Array(0.1, 0.9), 123)(0)
-
+  def testLowRes(treeType: TreeType.Value, depth: Int = 5): Unit = {
     val test = spark.read
       .format("libsvm")
       .option("numFeatures", 784)
-      .load("/home/novemser/Documents/Code/DSSM/src/main/resources/low_res/lowres_test.libsvm")
-
+      .load("/home/novemser/Documents/Code/DSSM/src/main/resources/low_res_10/lowres_test.libsvm")
     val timer = new Timer()
       .initTimer("src")
       .initTimer("transfer")
 
-    doExperimentLibSVM(src, tgt, test, treeType = treeType, timer = timer, maxDepth = 5)
-    doExperimentLibSVM(src, tgt, test, treeType = treeType, timer = timer, maxDepth = 10)
-    doExperimentLibSVM(src, tgt, test, treeType = treeType, timer = timer, maxDepth = 15)
-    //    doExperimentLibSVM(tgt, tgt, test, treeType = treeType, timer = timer, maxDepth = 10, srcOnly = true)
+    val errList = mutable.ArrayBuffer[Double]()
+    for (i <- 0 to 99) {
+      val src = spark.read
+        .format("libsvm")
+        .option("numFeatures", 784)
+        .load(s"/home/novemser/Documents/Code/DSSM/src/main/resources/low_res_10/lowres_source_$i.libsvm")
+
+      val tgt = spark.read
+        .format("libsvm")
+        .option("numFeatures", 784)
+        .load(s"/home/novemser/Documents/Code/DSSM/src/main/resources/low_res_10/lowres_target_$i.libsvm")
+
+      val (err, _) = doExperimentLibSVM(src, tgt, test, treeType = treeType, timer = timer, maxDepth = depth)
+      errList += err
+    }
+
+    timer.printTime()
+    println(
+      s"""
+         |TreeType:$treeType
+         |Depth:$depth
+         |Each:${errList.mkString(",")}
+         |Average:${errList.sum / errList.size}
+       """.stripMargin)
   }
 
   def testOffice(treeType: TreeType.Value): Unit = {
@@ -1091,11 +1099,12 @@ object DSSM {
   //  def testHighRes()
 
   def main(args: Array[String]): Unit = {
-    testOffice(TreeType.SER)
-    testOffice(TreeType.STRUT)
-    testOffice(TreeType.MIX)
+//    testOffice(TreeType.SER)
+//    testOffice(TreeType.STRUT)
+//    testOffice(TreeType.MIX)
 //    testUsps(null)
-//    testLowRes(TreeType.SER)
+//    testLowRes(TreeType.SER, 3)
+    testLowRes(TreeType.STRUT, 15)
 //    testInversion(TreeType.SER)
 //    testInversion(TreeType.STRUT)
 //    testInversion(TreeType.MIX)

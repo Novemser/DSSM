@@ -5,12 +5,7 @@ import java.io.File
 import com.github.tototoshi.csv.CSVWriter
 import com.novemser.DSSM.doExperiment
 import com.novemser.util.{SparkManager, Timer}
-//hello
-//胡胡胡胡
-//where r u
-//taking shower?
-//using small old huhu
-//love you 4ever
+
 object HHAR {
   private val spark = SparkManager.getSpark
 

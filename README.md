@@ -1,6 +1,12 @@
 # DSSM
 An implementation of distributed structure expansion/reduction(SER) and structure transfer (STRUT) model transfer algorithm(see https://arxiv.org/pdf/1511.01258.pdf).
 
+## Requirements
+
+- Spark 2.3.0
+- Java 8
+- Scala 2.11
+
 ## Usage
 1. To reproduce expriment results in the original paper using DSSM, first prepare the dataset stated in the paper. A direct download link will be provided later.
 
@@ -16,7 +22,7 @@ val data = spark.read
     .filter("class != 'null'")
 
 // Then we define some commonly used ML pipeline components,
-// more information could be found 
+// more information could be found here http://spark.apache.org/docs/2.3.0/ml-guide.html
 val trainLabelIndexer = new StringIndexer()
     .setHandleInvalid("skip")
     .setInputCol("class")

@@ -1,5 +1,5 @@
 # DSSM
-An implementation of distributed structure expansion/reduction(SER) and structure transfer (STRUT) model transfer algorithm(see https://arxiv.org/pdf/1511.01258.pdf).
+An implementation of distributed structure expansion/reduction(SER) and structure transfer (STRUT) model transfer algorithm(see https://arxiv.org/pdf/1511.01258.pdf). Dataset used in the paper could be downloaded here. https://drive.google.com/file/d/19tFYaahJ2c_6El_ZVVIuXlVyXBgR-XrF/view?usp=sharing
 
 ## Requirements
 
